@@ -1,0 +1,11 @@
+# 构建产物
+build/
+.DS_Store
+
+# bundle 生成物（源在 editor/ + index.html，构建时由 tools/bundle.mjs 生成）
+EditorResources/editor.bundle.js
+EditorResources/index.bundle.html
+EditorResources/lib/codemirror/modes.bundle.js
+
+# e2e 生成物（tools/gen-e2e-*.mjs 生成）
+EditorResources/e2e-*.html

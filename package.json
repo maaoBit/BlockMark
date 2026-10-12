@@ -1,0 +1,11 @@
+{
+  "name": "blockmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/parser.test.mjs && node test/m1.test.mjs && node test/m2b.test.mjs",
+    "bundle": "node tools/bundle.mjs",
+    "build": "./build.sh",
+    "e2e": "./tools/run-e2e.sh"
+  }
+}

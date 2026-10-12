@@ -1,0 +1,25 @@
+/* BlockMark 内置主题：dark —— 仅覆盖 :root 变量 */
+:root {
+  --fg: #e5e7eb;
+  --fg-dim: #9ca3af;
+  --fg-faint: #6b7280;
+  --bg: #1e2127;
+  --bg-dim: #262a31;
+  --accent: #5b9bff;
+  --link: #5b9bff;
+  --code-bg: #2a2e36;
+  --border: #3a3f48;
+  --edit-bg: #2b2a1f;
+  --edit-border: #6b6236;
+  --mark-color: #6b7280;
+  --mark-bg: rgba(107, 114, 128, 0.22);
+  --mark-active-color: #d29922;
+  --mark-active-bg: rgba(210, 153, 34, 0.2);
+  --block-hover: rgba(91, 155, 255, 0.07);
+  --row-alt: #23272e;
+  --hover-bg: rgba(255, 255, 255, 0.06);
+  --err: #f87171;
+  --flash-bg: rgba(91, 155, 255, 0.25);
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+body { background: var(--bg); }

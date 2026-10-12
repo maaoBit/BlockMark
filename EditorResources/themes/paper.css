@@ -1,0 +1,17 @@
+/* BlockMark 内置主题：paper —— 米色护眼底 */
+:root {
+  --fg: #3b3228;
+  --fg-dim: #857a6b;
+  --fg-faint: #b0a493;
+  --bg: #f7f1e3;
+  --bg-dim: #efe7d4;
+  --accent: #b07d2b;
+  --link: #b07d2b;
+  --code-bg: #efe8d8;
+  --border: #ddd0b8;
+  --edit-bg: #fdf6e3;
+  --edit-border: #d8c88f;
+  --row-alt: #f1e9d6;
+  --flash-bg: rgba(176, 125, 43, 0.2);
+}
+body { background: var(--bg); }
