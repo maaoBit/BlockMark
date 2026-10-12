@@ -249,7 +249,7 @@ final class Updater: NSObject {
         let appPath = Bundle.main.bundleURL.path
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "sleep 1; open -a "\(appPath)""]
+        p.arguments = ["-c", "sleep 1; open -a '" + appPath + "'"]
         try? p.run()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
     }
