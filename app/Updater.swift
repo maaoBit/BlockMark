@@ -244,11 +244,14 @@ final class Updater: NSObject {
         for case let doc as MarkdownDocument in NSDocumentController.shared.documents {
             doc.flushAutosave()
         }
-        let cfg = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in
-            // 等 spawn 完成再退旧进程（直接 terminate 会与启动竞态，出现新旧皆死的窗口）
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
-        }
+        // 经典 Relauncher 模式：spawn 独立 shell（不受本进程退出影响），延时 open 新 app
+        // （NSWorkspace.openApplication + terminate 组合在替换场景下启动竞态，实测新进程不起）
+        let appPath = Bundle.main.bundleURL.path
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; open -a "\(appPath)""]
+        try? p.run()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
     }
 
     private func alert(_ style: NSAlert.Style, _ title: String, _ text: String) {
