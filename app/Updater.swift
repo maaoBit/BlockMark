@@ -246,7 +246,8 @@ final class Updater: NSObject {
         }
         let cfg = NSWorkspace.OpenConfiguration()
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+            // 等 spawn 完成再退旧进程（直接 terminate 会与启动竞态，出现新旧皆死的窗口）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
         }
     }
 
