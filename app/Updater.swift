@@ -249,8 +249,8 @@ final class Updater: NSObject {
         let appPath = Bundle.main.bundleURL.path
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // sleep 2：给旧进程退出留余量；输出留痕便于诊断 LaunchServices 启动失败
-        p.arguments = ["-c", "sleep 2; open -a '" + appPath + "' >> /tmp/bm-relaunch.log 2>&1; echo done-$? >> /tmp/bm-relaunch.log"]
+        // sleep 2：旧进程退出与 LaunchServices 清理需要余量，1s 实测不够（新实例不起）
+        p.arguments = ["-c", "sleep 2; open -a '" + appPath + "'"]
         try? p.run()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
     }
