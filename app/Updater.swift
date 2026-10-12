@@ -249,7 +249,8 @@ final class Updater: NSObject {
         let appPath = Bundle.main.bundleURL.path
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "sleep 1; open -a '" + appPath + "'"]
+        // sleep 2：给旧进程退出留余量；输出留痕便于诊断 LaunchServices 启动失败
+        p.arguments = ["-c", "sleep 2; open -a '" + appPath + "' >> /tmp/bm-relaunch.log 2>&1; echo done-$? >> /tmp/bm-relaunch.log"]
         try? p.run()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
     }
