@@ -15,6 +15,14 @@
 - **导出**：HTML / PDF（WKWebView createPDF）/ Word docx（调用 pandoc，未装则提示）
 - 体积小：原生壳 ~250KB 二进制 + 4MB 三方前端资源
 
+## 安装与更新
+
+- 从 [Releases](https://github.com/maaoBit/BlockMark/releases) 下载 zip，解压拖入 /Applications
+- 首次打开若被 Gatekeeper 拦截（无公证签名）：右键 App → 打开
+- 应用内菜单 **BlockMark → 检查更新…** 自动更新；启动后每 24h 静默检查一次，有新版本会提示下载并就地替换
+
+发布新版本：改 `app/Info.plist` 版本号后 `./tools/release.sh`（build + zip + GitHub Release，即自动更新源）。
+
 ## 构建
 
 依赖：Xcode Command Line Tools（swiftc）、Node.js（构建期打包用）、[可选] Pillow（重新生成图标）

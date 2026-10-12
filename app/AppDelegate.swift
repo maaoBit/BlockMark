@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, NSDocumentController.shared.documents.isEmpty else { return }
             self.openFallbackUntitled()
         }
+        Updater.shared.scheduleBackgroundCheck()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -83,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenuItem(title: "BlockMark", action: nil, keyEquivalent: "")
         let appSubMenu = NSMenu()
         appSubMenu.addItem(withTitle: "关于 BlockMark", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appSubMenu.addItem(withTitle: "检查更新…", action: #selector(Updater.shared.checkNow), keyEquivalent: "")
         appSubMenu.addItem(.separator())
         appSubMenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenu.submenu = appSubMenu

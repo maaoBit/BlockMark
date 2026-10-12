@@ -10,7 +10,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 echo "== swiftc =="
 swiftc -O \
   -o "$APP/Contents/MacOS/BlockMark" \
-  app/main.swift app/AppDelegate.swift app/Document.swift app/DocumentFileWatcher.swift app/EditorWindowController.swift \
+  app/main.swift app/AppDelegate.swift app/Document.swift app/DocumentFileWatcher.swift app/EditorWindowController.swift app/Updater.swift \
   -framework Cocoa -framework WebKit
 
 echo "== bundle editor (WKWebView file:// 不支持 ES module 导入) =="
