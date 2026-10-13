@@ -9,3 +9,6 @@ EditorResources/lib/codemirror/modes.bundle.js
 
 # e2e 生成物（tools/gen-e2e-*.mjs 生成）
 EditorResources/e2e-*.html
+
+# release 打包产物
+BlockMark-*.zip
