@@ -84,7 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenuItem(title: "BlockMark", action: nil, keyEquivalent: "")
         let appSubMenu = NSMenu()
         appSubMenu.addItem(withTitle: "关于 BlockMark", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        appSubMenu.addItem(withTitle: "检查更新…", action: #selector(Updater.shared.checkNow), keyEquivalent: "")
+        appSubMenu.addItem(withTitle: "检查更新…", action: #selector(Updater.checkNow), keyEquivalent: "")
+            .target = Updater.shared // 单例不在响应链上，nil-target 验证永不命中 → 必须显式绑定
         appSubMenu.addItem(.separator())
         appSubMenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenu.submenu = appSubMenu
