@@ -9,6 +9,7 @@ import { parseBlocks, serializeBlocks, reclassify, mathTex, toggleTaskItem, tabl
 import { renderInline, renderTable, escapeHtml, highlightEditableSource } from "./inline.js";
 
 const write = () => document.getElementById("write");
+const scroller = () => document.getElementById("bm-main"); // 滚动容器：全宽 .bm-main（.write 只限宽居中）
 
 let blocks = [];            // [{cid, type, level, lang, source}]
 let editingCid = null;      // contenteditable 编辑态的块
@@ -949,9 +950,9 @@ function bindEvents() {
       if (sel.rangeCount) {
         const rect = sel.getRangeAt(0).getBoundingClientRect();
         if (rect.height > 0) {
-          const wEl = write();
-          const target = wEl.scrollTop + rect.top - wEl.getBoundingClientRect().top - wEl.clientHeight / 2;
-          wEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+          const scEl = scroller();
+          const target = scEl.scrollTop + rect.top - scEl.getBoundingClientRect().top - scEl.clientHeight / 2;
+          scEl.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
         }
       }
     }

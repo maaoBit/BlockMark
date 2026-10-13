@@ -1,0 +1,46 @@
+/* BlockMark 内置主题：one-dark —— Atom One Dark Pro 官方公开色板重绘（VS Code 第三方主题装机王 12.8M+） */
+:root {
+  --fg: #abb2bf;
+  --fg-dim: #828997;
+  --fg-faint: #5c6370;
+  --bg: #282c34;
+  --bg-dim: #21252b;
+  --accent: #61afef;
+  --link: #61afef;
+  --code-bg: #21252b;
+  --border: #3e4451;
+  --edit-bg: #333842;
+  --edit-border: #4b5263;
+  --mark-color: #5c6370;
+  --mark-bg: rgba(92, 99, 112, 0.28);
+  --mark-active-color: #e5c07b;
+  --mark-active-bg: rgba(229, 192, 123, 0.18);
+  --block-hover: rgba(97, 175, 239, 0.07);
+  --row-alt: #2c313a;
+  --hover-bg: rgba(255, 255, 255, 0.06);
+  --err: #e06c75;
+  --flash-bg: rgba(97, 175, 239, 0.22);
+  --shadow: rgba(0, 0, 0, 0.45);
+}
+body { background: var(--bg); }
+
+/* CodeMirror 编辑态语法色（One Dark 官方） */
+.bm-cm-host .cm-header { color: #e06c75; font-weight: 600; }
+.bm-cm-host .cm-link, .bm-cm-host .cm-url { color: #61afef; }
+.bm-cm-host .cm-quote { color: #5c6370; }
+.bm-cm-host .cm-em { color: #c678dd; }
+.bm-cm-host .cm-strong { color: #e5c07b; }
+.bm-cm-host .cm-keyword { color: #c678dd; }
+.bm-cm-host .cm-atom { color: #d19a66; }
+.bm-cm-host .cm-number { color: #d19a66; }
+.bm-cm-host .cm-def { color: #e5c07b; }
+.bm-cm-host .cm-variable, .bm-cm-host .cm-variable-2, .bm-cm-host .cm-variable-3 { color: #e06c75; }
+.bm-cm-host .cm-property { color: #abb2bf; }
+.bm-cm-host .cm-operator { color: #56b6c2; }
+.bm-cm-host .cm-comment { color: #5c6370; }
+.bm-cm-host .cm-string, .bm-cm-host .cm-string-2 { color: #98c379; }
+.bm-cm-host .cm-meta { color: #61afef; }
+.bm-cm-host .cm-builtin { color: #56b6c2; }
+.bm-cm-host .cm-bracket { color: #abb2bf; }
+.bm-cm-host .cm-tag { color: #e06c75; }
+.bm-cm-host .cm-attribute { color: #d19a66; }

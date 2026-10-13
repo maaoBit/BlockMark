@@ -5,6 +5,15 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 let html = readFileSync(join(root, "EditorResources", "index.bundle.html"), "utf8");
+// 新主题回归门：三个内置主题文件必须存在且含变量与 CM 语法段（缺失/残缺 → 生成即失败）
+const THEMES = {};
+for (const t of ["one-dark", "dracula", "nord"]) {
+  const css = readFileSync(join(root, "EditorResources", "themes", t + ".css"), "utf8");
+  if (!css.includes("--accent") || !css.includes(".bm-cm-host .cm-header")) {
+    throw new Error("theme css incomplete: " + t);
+  }
+  THEMES[t] = css;
+}
 const test = String.raw`<script>
 window.addEventListener("DOMContentLoaded", async () => {
   const r = {};
@@ -35,12 +44,33 @@ window.addEventListener("DOMContentLoaded", async () => {
     // 5) 内容列宽收敛（820px 上限 → 视口足够时 .write 宽度 ≈ 820）
     r.writeWidth = document.getElementById("write").getBoundingClientRect().width;
     r.colWidth = r.writeWidth >= 700 && r.writeWidth <= 860;
+    // 6) 滚动职责分离（全屏右侧空白可滚的回归门）：.bm-main 持滚动，.write 只限宽居中
+    const mainEl = document.getElementById("bm-main");
+    const mainCs = getComputedStyle(mainEl), writeCs = getComputedStyle(document.getElementById("write"));
+    r.mainIsScroller = mainCs.overflowY === "auto" || mainCs.overflowY === "scroll";
+    r.writeNotScroller = writeCs.overflowY === "visible";
+    // 行为级：长文档下 .bm-main 可滚，且视口右缘空白落点在 .bm-main 上（旧实现 .write 自滚，壳不可滚）
+    Editor.open(Array.from({length: 80}, (_, i) => "第" + i + "行：滚动职责分离样例段落文本。").join("\n\n"));
+    r.mainScrollable = mainEl.scrollHeight > mainEl.clientHeight;
+    r.gutterHit = mainEl.contains(document.elementFromPoint(innerWidth - 8, Math.floor(innerHeight / 2)));
+    // 7) 新内置主题（one-dark/dracula/nord）：注入后底色与 accent 变量生效，data-theme 正确
+    r.themes = {};
+    for (const [name, css] of Object.entries(BM_THEMES)) {
+      Bridge.dispatch("theme.apply", { name, css });
+      const bg = getComputedStyle(document.body).backgroundColor;
+      const acc = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+      r.themes[name] = bg !== "rgb(255, 255, 255)" && acc.length > 0 &&
+                       document.documentElement.dataset.theme === name;
+    }
+    Bridge.dispatch("theme.apply", { name: "default", css: "" });
+    r.newThemes = Object.values(r.themes).every(Boolean);
     const pre = document.createElement("pre");
     pre.id = "e2e-result";
     pre.textContent = JSON.stringify(r);
     document.body.appendChild(pre);
     const ok = r.h1Big && r.h2Mid && r.noYellow && r.hoverTint && r.editFsKept &&
-               r.bold && r.italic && r.noAsterisk && r.colWidth;
+               r.bold && r.italic && r.noAsterisk && r.colWidth &&
+               r.mainIsScroller && r.writeNotScroller && r.mainScrollable && r.gutterHit && r.newThemes;
     document.title = ok ? "LOOK-E2E PASS" : "LOOK-E2E FAIL";
   } catch (e) {
     const pre = document.createElement("pre");
@@ -52,6 +82,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 </script>
 `;
-html = html.replace("</body>", () => test + "\n</body>");
+html = html.replace("</body>", () => "<script>const BM_THEMES=" + JSON.stringify(THEMES).replace(/</g, "\\u003c") + ";</script>\n" + test + "\n</body>");
 writeFileSync(join(root, "EditorResources", "e2e-look.html"), html);
 console.log("generated");

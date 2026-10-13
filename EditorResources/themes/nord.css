@@ -1,0 +1,46 @@
+/* BlockMark 内置主题：nord —— Nord 官方公开色板重绘（北境冷色低饱和，写作/笔记社区标志主题） */
+:root {
+  --fg: #d8dee9;
+  --fg-dim: #9aa5b8;
+  --fg-faint: #616e88;
+  --bg: #2e3440;
+  --bg-dim: #3b4252;
+  --accent: #88c0d0;
+  --link: #81a1c1;
+  --code-bg: #3b4252;
+  --border: #434c5e;
+  --edit-bg: #3b4252;
+  --edit-border: #4c566a;
+  --mark-color: #616e88;
+  --mark-bg: rgba(97, 105, 136, 0.3);
+  --mark-active-color: #ebcb8b;
+  --mark-active-bg: rgba(235, 203, 139, 0.14);
+  --block-hover: rgba(136, 192, 208, 0.06);
+  --row-alt: #333947;
+  --hover-bg: rgba(216, 222, 233, 0.06);
+  --err: #bf616a;
+  --flash-bg: rgba(136, 192, 208, 0.18);
+  --shadow: rgba(0, 0, 0, 0.45);
+}
+body { background: var(--bg); }
+
+/* CodeMirror 编辑态语法色（Nord 官方） */
+.bm-cm-host .cm-header { color: #81a1c1; font-weight: 600; }
+.bm-cm-host .cm-link, .bm-cm-host .cm-url { color: #88c0d0; }
+.bm-cm-host .cm-quote { color: #616e88; }
+.bm-cm-host .cm-em { color: #b48ead; }
+.bm-cm-host .cm-strong { color: #ebcb8b; }
+.bm-cm-host .cm-keyword { color: #81a1c1; }
+.bm-cm-host .cm-atom { color: #b48ead; }
+.bm-cm-host .cm-number { color: #b48ead; }
+.bm-cm-host .cm-def { color: #8fbcbb; }
+.bm-cm-host .cm-variable, .bm-cm-host .cm-variable-2, .bm-cm-host .cm-variable-3 { color: #d8dee9; }
+.bm-cm-host .cm-property { color: #d8dee9; }
+.bm-cm-host .cm-operator { color: #81a1c1; }
+.bm-cm-host .cm-comment { color: #616e88; }
+.bm-cm-host .cm-string, .bm-cm-host .cm-string-2 { color: #a3be8c; }
+.bm-cm-host .cm-meta { color: #d8dee9; }
+.bm-cm-host .cm-builtin { color: #8fbcbb; }
+.bm-cm-host .cm-bracket { color: #81a1c1; }
+.bm-cm-host .cm-tag { color: #81a1c1; }
+.bm-cm-host .cm-attribute { color: #8fbcbb; }

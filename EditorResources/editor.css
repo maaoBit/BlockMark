@@ -35,9 +35,9 @@ body {
   flex-direction: column;
 }
 
+/* 滚动容器是全宽的 .bm-main；.write 只负责限宽居中（两侧空白也能滚，滚动条贴窗口右缘） */
 .write {
-  flex: 1;
-  overflow-y: auto;
+  min-height: 100%;
   max-width: 820px;
   width: 100%;
   margin: 0 auto;
@@ -92,14 +92,14 @@ body {
 .bm-lang-input {
   width: 110px; padding: 1px 8px; border: 1px solid var(--border);
   border-radius: 5px; font-family: var(--font-mono); font-size: 12px;
-  color: var(--accent); outline: none; background: #fff;
+  color: var(--accent); outline: none; background: var(--bg);
 }
 .bm-lang-input:focus { border-color: var(--accent); }
 .bm-cm-hint { opacity: .55; }
 .bm-cm-host .CodeMirror {
   height: auto; border: 1px solid var(--border); border-radius: 8px;
   font-family: var(--font-mono); font-size: 13px; line-height: 1.55;
-  background: #fff;
+  background: var(--code-bg); color: var(--fg);
 }
 .bm-cm-host .CodeMirror-scroll { min-height: 60px; }
 
@@ -259,7 +259,7 @@ body { flex-direction: row; }
 .bm-search-hit-line { font-size: 12px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bm-search-hit-line mark { background: var(--flash-bg); border-radius: 2px; padding: 0 1px; }
 .bm-sidebar-empty { color: var(--fg-faint); font-size: 12px; padding: 12px 8px; }
-.bm-main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+.bm-main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; overflow-y: auto; overflow-x: hidden; }
 
 /* ---------- 打字机 / 专注模式 ---------- */
 .bm-focus[data-focus-cid] .bm-block { opacity: 0.28; transition: opacity .18s; }

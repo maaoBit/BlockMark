@@ -1,0 +1,46 @@
+/* BlockMark 内置主题：dracula —— Dracula 官方公开色板重绘（跨编辑器移植最广 11.0M+） */
+:root {
+  --fg: #f8f8f2;
+  --fg-dim: #a9afc9;
+  --fg-faint: #6272a4;
+  --bg: #282a36;
+  --bg-dim: #343746;
+  --accent: #bd93f9;
+  --link: #ff79c6;
+  --code-bg: #21222c;
+  --border: #44475a;
+  --edit-bg: #323445;
+  --edit-border: #6272a4;
+  --mark-color: #6272a4;
+  --mark-bg: rgba(98, 114, 164, 0.25);
+  --mark-active-color: #ffb86c;
+  --mark-active-bg: rgba(255, 184, 108, 0.16);
+  --block-hover: rgba(189, 147, 249, 0.08);
+  --row-alt: #2e303e;
+  --hover-bg: rgba(248, 248, 242, 0.06);
+  --err: #ff5555;
+  --flash-bg: rgba(189, 147, 249, 0.2);
+  --shadow: rgba(0, 0, 0, 0.45);
+}
+body { background: var(--bg); }
+
+/* CodeMirror 编辑态语法色（Dracula 官方） */
+.bm-cm-host .cm-header { color: #ff79c6; font-weight: 600; }
+.bm-cm-host .cm-link, .bm-cm-host .cm-url { color: #8be9fd; }
+.bm-cm-host .cm-quote { color: #6272a4; }
+.bm-cm-host .cm-em { color: #f1fa8c; }
+.bm-cm-host .cm-strong { color: #ffb86c; }
+.bm-cm-host .cm-keyword { color: #ff79c6; }
+.bm-cm-host .cm-atom { color: #bd93f9; }
+.bm-cm-host .cm-number { color: #bd93f9; }
+.bm-cm-host .cm-def { color: #50fa7b; }
+.bm-cm-host .cm-variable, .bm-cm-host .cm-variable-2, .bm-cm-host .cm-variable-3 { color: #f8f8f2; }
+.bm-cm-host .cm-property { color: #f8f8f2; }
+.bm-cm-host .cm-operator { color: #ff79c6; }
+.bm-cm-host .cm-comment { color: #6272a4; }
+.bm-cm-host .cm-string, .bm-cm-host .cm-string-2 { color: #f1fa8c; }
+.bm-cm-host .cm-meta { color: #f8f8f2; }
+.bm-cm-host .cm-builtin { color: #8be9fd; }
+.bm-cm-host .cm-bracket { color: #f8f8f2; }
+.bm-cm-host .cm-tag { color: #ff79c6; }
+.bm-cm-host .cm-attribute { color: #50fa7b; }
