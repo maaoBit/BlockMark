@@ -493,10 +493,14 @@ let cellEditing = null; // {cid, td}
 
 function enterCellEdit(blockEl, td) {
   if (!td) return;
-  commitCellEdit();
+  if (cellEditing) commitCellEdit();   // 先提交上一格；其重渲染会替换整块 DOM
+  // 上一步 rerenderBlock 后入参 td 可能已脱离 DOM（双击/直接点另一格）：按 r/c 重新解析
+  const r = td.dataset.r, c = td.dataset.c;
+  blockEl = write().querySelector(`[data-cid="${blockEl.dataset.cid}"]`) || blockEl;
+  td = blockEl.querySelector(`td[data-r="${r}"][data-c="${c}"], th[data-r="${r}"][data-c="${c}"]`) || td;
   const b = findBlock(blockEl.dataset.cid);
   if (!b) return;
-  const src = tableGetCell(b.source, +td.dataset.r, +td.dataset.c) ?? "";
+  const src = tableGetCell(b.source, +r, +c) ?? "";
   td.textContent = src;                    // 显示该格源码（与整块编辑模型一致）
   td.classList.add("bm-cell-editing");
   td.focus();

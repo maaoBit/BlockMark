@@ -55,6 +55,27 @@ window.addEventListener("DOMContentLoaded", async () => {
     r.cellCommitted = Editor.getMarkdown().includes("| 改过 | a2 |");
     r.cellRendered = document.querySelector('[data-r="1"][data-c="0"]').textContent === "改过";
 
+    // ---------- 双击单元格回归：第二击的重渲染不得让 td 脱钩（否则后续点击全失效） ----------
+    Editor.open("| A | B |\n|---|---|\n| a1 | a2 |\n");
+    const dCid = document.querySelector('[data-type="table"]').dataset.cid;
+    const dTd = document.querySelector('[data-r="1"][data-c="0"]');
+    dTd.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    dTd.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); // 双击第二击
+    await sleep(30);
+    const dLive = document.querySelector('[data-cid="' + dCid + '"] [data-r="1"][data-c="0"]');
+    r.dblLive = !!dLive && dLive.isConnected;
+    r.dblEditing = !!dLive && dLive.classList.contains("bm-cell-editing") && dLive.textContent === "a1";
+    r.dblFocus = document.activeElement === dLive;
+    // 第三击（用户"再次点击"）仍可进入编辑并写回
+    dLive.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await sleep(30);
+    const dLive2 = document.querySelector('[data-cid="' + dCid + '"] [data-r="1"][data-c="0"]');
+    r.dblReclick = !!dLive2 && dLive2.classList.contains("bm-cell-editing");
+    dLive2.textContent = "双击改";
+    dLive2.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await sleep(30);
+    r.dblWriteback = Editor.getMarkdown().includes("| 双击改 | a2 |");
+
     // ---------- URL 智能粘贴 ----------
     Editor.open("看看 站点 词\n");
     const cid = document.querySelector('[data-type="paragraph"]').dataset.cid;
