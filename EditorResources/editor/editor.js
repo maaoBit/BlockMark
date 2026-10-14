@@ -1088,10 +1088,9 @@ function markSaved(auto) {
 }
 
 
-// ---------- M3 侧栏（文件树 + 大纲 + 全局搜索；数据由原生 library.* 桥供给） ----------
+// ---------- M3 侧栏（双 dock 面板：文件树/大纲 tab 可拖动分栏 + 边界拖宽；数据由原生 library.* 桥供给） ----------
 
 let sidebarOpen = false;
-let sidebarTab = "files";
 let libraryRoot = null;      // 侧栏根目录（当前文档所在目录）
 let currentFilePath = null;  // 当前文档绝对路径（高亮用）
 let fileTreeLoaded = false;
@@ -1100,8 +1099,44 @@ const expandedDirs = new Set();
 let searchMode = false;
 let searchSeq = 0;
 
+const TAB_NAMES = { files: "文件", outline: "大纲" };
+const SIDEBAR_MIN_W = 180, SIDEBAR_MAX_W = 480;
+// tab → 停靠侧；panelActive → 各侧当前激活 tab；宽度按侧独立持久化
+let sidebarLayout = { files: "left", outline: "left" };
+let panelActive = { left: null, right: null };
+let sidebarWidths = { left: 240, right: 260 };
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* 隐私模式等 */ } },
+};
+(function restoreSidebarPrefs() {
+  try {
+    const l = JSON.parse(store.get("bm.sidebar.layout", "null"));
+    if (l && TAB_NAMES[l.files] && TAB_NAMES[l.outline]) sidebarLayout = { files: l.files, outline: l.outline };
+  } catch { /* 坏数据回默认 */ }
+  for (const s of ["left", "right"]) {
+    const w = parseInt(store.get("bm.sidebar.w." + s, ""), 10);
+    if (w >= SIDEBAR_MIN_W && w <= SIDEBAR_MAX_W) sidebarWidths[s] = w;
+  }
+})();
+
+const sideEls = side => ({
+  panel: document.getElementById(side === "left" ? "bm-sidebar" : "bm-sidebar-right"),
+  body: document.getElementById(side === "left" ? "bm-sidebar-body" : "bm-sidebar-body-right"),
+  resizer: document.getElementById(side === "left" ? "bm-resizer-left" : "bm-resizer-right"),
+});
 const sidebarEl = () => document.getElementById("bm-sidebar");
 const sidebarBody = () => document.getElementById("bm-sidebar-body");
+const filesBody = () => sideEls(sidebarLayout.files).body;
+
+const clampW = w => Math.max(SIDEBAR_MIN_W, Math.min(SIDEBAR_MAX_W, w));
+
+function saveSidebarPrefs() {
+  store.set("bm.sidebar.layout", JSON.stringify(sidebarLayout));
+  store.set("bm.sidebar.w.left", String(sidebarWidths.left));
+  store.set("bm.sidebar.w.right", String(sidebarWidths.right));
+}
 
 function toggleSidebar(force) {
   const el = sidebarEl();
@@ -1109,25 +1144,63 @@ function toggleSidebar(force) {
   const to = force !== undefined ? force : !sidebarOpen;
   if (to === sidebarOpen) return;
   sidebarOpen = to;
-  el.style.display = to ? "flex" : "none";
-  if (to) {
-    renderSidebarBody();
-    if (sidebarTab === "files" && !fileTreeLoaded) Bridge.call("library.listDocs", {});
-  }
+  if (to && !fileTreeLoaded) Bridge.call("library.listDocs", {});
+  rebuildSidebar();
 }
 
 function setSidebarTab(tab) {
-  sidebarTab = tab;
-  searchMode = false;
-  for (const t of document.querySelectorAll(".bm-sidebar-tab"))
-    t.classList.toggle("active", t.dataset.tab === tab);
+  if (!TAB_NAMES[tab]) return;
+  panelActive[sidebarLayout[tab]] = tab;
+  if (tab !== "files") searchMode = false;
+  rebuildSidebar();
+}
+
+// tab 迁移（拖拽落点与测试/快捷指令共用此入口）
+function moveSidebarTab(tab, side) {
+  if (!TAB_NAMES[tab] || (side !== "left" && side !== "right")) return;
+  if (sidebarLayout[tab] === side) return;
+  sidebarLayout[tab] = side;
+  panelActive[side] = tab;
+  saveSidebarPrefs();
+  rebuildSidebar();
+}
+
+function setSidebarWidth(px, side = "left") {
+  if (side !== "left" && side !== "right") return;
+  sidebarWidths[side] = clampW(px);
+  saveSidebarPrefs();
+  rebuildSidebar();
+}
+
+// 重建两个面板：tab 按钮 / 搜索框归属 / 显示与宽度，随后渲染内容
+function rebuildSidebar() {
+  for (const side of ["left", "right"]) {
+    const els = sideEls(side);
+    if (!els.panel) continue;
+    const tabs = Object.keys(TAB_NAMES).filter(t => sidebarLayout[t] === side);
+    if (!panelActive[side] || !tabs.includes(panelActive[side])) panelActive[side] = tabs[0] || null;
+    els.panel.querySelector(".bm-sidebar-tabs").innerHTML = tabs.map(t =>
+      `<button class="bm-sidebar-tab${t === panelActive[side] ? " active" : ""}" data-tab="${t}">${TAB_NAMES[t]}</button>`).join("");
+    const show = sidebarOpen && tabs.length > 0;
+    els.panel.style.display = show ? "flex" : "none";
+    els.resizer.style.display = show ? "block" : "none";
+    if (show) els.panel.style.width = sidebarWidths[side] + "px";
+  }
+  // 搜索框属于 files 所在面板（整体搬移节点，input 监听器不丢）
+  const fEl = sideEls(sidebarLayout.files);
+  const wrap = document.getElementById("bm-search-wrap");
+  if (wrap && fEl.panel && wrap.parentElement !== fEl.panel) fEl.panel.insertBefore(wrap, fEl.body);
   renderSidebarBody();
 }
 
 function renderSidebarBody() {
-  if (searchMode) return;                       // 搜索结果不被覆盖
-  if (sidebarTab === "outline") renderOutline();
-  else renderFileTree();
+  for (const side of ["left", "right"]) {
+    const els = sideEls(side);
+    if (!els.body || els.panel.style.display === "none") continue;
+    const tab = panelActive[side];
+    if (tab === "outline") renderOutline(els.body);
+    else if (tab === "files" && !searchMode) renderFileTree(els.body); // 搜索结果不被覆盖
+  }
 }
 
 function treeDirHtml(dirPath) {
@@ -1144,16 +1217,16 @@ function treeDirHtml(dirPath) {
   return `<div class="bm-tree-children">${kids}</div>`;
 }
 
-function renderFileTree() {
-  const body = sidebarBody();
+function renderFileTree(body) {
+  body = body || filesBody();
   if (!body) return;
   if (!libraryRoot) { body.innerHTML = '<div class="bm-sidebar-empty">保存文件后可见目录</div>'; return; }
   if (!dirCache.has(libraryRoot)) { body.innerHTML = '<div class="bm-sidebar-empty">加载中…</div>'; return; }
   body.innerHTML = treeDirHtml(libraryRoot) || '<div class="bm-sidebar-empty">空目录</div>';
 }
 
-function renderOutline() {
-  const body = sidebarBody();
+function renderOutline(body) {
+  body = body || sideEls(sidebarLayout.outline).body;
   if (!body) return;
   const hs = blocks.filter(b => b.type === "heading");
   if (!hs.length) { body.innerHTML = '<div class="bm-sidebar-empty">无标题</div>'; return; }
@@ -1165,7 +1238,7 @@ function renderOutline() {
 }
 
 function renderSearchResults(results, query, done) {
-  const body = sidebarBody();
+  const body = filesBody();
   if (!body) return;
   if (!results.length) {
     body.innerHTML = `<div class="bm-sidebar-empty">${done ? "无匹配" : "搜索中…"}</div>`;
@@ -1180,38 +1253,106 @@ function renderSearchResults(results, query, done) {
     (done ? "" : '<div class="bm-sidebar-empty">搜索中…</div>');
 }
 
-function bindSidebarEvents() {
-  const el = sidebarEl();
+let suppressTabClick = false;
+
+// 边界拖宽：left 越往右越宽；right 越往左越宽
+function bindResizer(el, side) {
   if (!el) return;
-  el.querySelector(".bm-sidebar-tabs").addEventListener("click", e => {
+  el.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    const startX = e.clientX, startW = sidebarWidths[side];
+    document.body.classList.add("bm-resizing");
+    const move = ev => {
+      const delta = side === "left" ? ev.clientX - startX : startX - ev.clientX;
+      sidebarWidths[side] = clampW(startW + delta);
+      const els = sideEls(side);
+      if (els.panel.style.display !== "none") els.panel.style.width = sidebarWidths[side] + "px";
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("bm-resizing");
+      saveSidebarPrefs();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
+
+// tab 拖拽迁移：位移超阈值进入拖拽，对侧面板显示落点提示（隐藏时临时展开窄落点条），松手按落点判定迁移/取消
+function bindTabDrag(tabsEl, side) {
+  if (!tabsEl) return;
+  tabsEl.addEventListener("pointerdown", e => {
     const tab = e.target.closest(".bm-sidebar-tab");
-    if (tab) setSidebarTab(tab.dataset.tab);
+    if (!tab) return;
+    const name = tab.dataset.tab;
+    const other = side === "left" ? "right" : "left";
+    const target = sideEls(other);
+    const sx = e.clientX, sy = e.clientY;
+    let dragging = false;
+    const move = ev => {
+      if (!dragging && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 8) return;
+      dragging = true;
+      document.body.classList.add("bm-dragging-tab");
+      const p = target.panel;
+      p.classList.add("bm-drop-hint");
+      if (p.style.display === "none") { p.style.width = "120px"; p.style.display = "flex"; }
+    };
+    const up = ev => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (!dragging) return;                     // 纯点击 → click 事件照常切 tab
+      suppressTabClick = true;
+      document.body.classList.remove("bm-dragging-tab");
+      const r = target.panel.getBoundingClientRect();
+      const inside = ev.clientX >= r.left - 24 && ev.clientX <= r.right + 24 &&
+                     ev.clientY >= r.top - 8 && ev.clientY <= r.bottom + 8;
+      target.panel.classList.remove("bm-drop-hint");
+      if (inside) moveSidebarTab(name, other);
+      else rebuildSidebar();                     // 取消：恢复原布局显示
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   });
-  sidebarBody().addEventListener("click", e => {
-    const dir = e.target.closest(".bm-tree-dir");
-    if (dir) {
-      const path = dir.dataset.dir;
-      if (expandedDirs.has(path)) expandedDirs.delete(path);
-      else {
-        expandedDirs.add(path);
-        if (!dirCache.has(path)) { dirCache.set(path, "loading"); Bridge.call("library.listDocs", { path }); }
+}
+
+function bindSidebarEvents() {
+  for (const side of ["left", "right"]) {
+    const els = sideEls(side);
+    if (!els.panel) continue;
+    els.panel.querySelector(".bm-sidebar-tabs").addEventListener("click", e => {
+      if (suppressTabClick) { suppressTabClick = false; return; }
+      const tab = e.target.closest(".bm-sidebar-tab");
+      if (tab) setSidebarTab(tab.dataset.tab);
+    });
+    els.body.addEventListener("click", e => {
+      const dir = e.target.closest(".bm-tree-dir");
+      if (dir) {
+        const path = dir.dataset.dir;
+        if (expandedDirs.has(path)) expandedDirs.delete(path);
+        else {
+          expandedDirs.add(path);
+          if (!dirCache.has(path)) { dirCache.set(path, "loading"); Bridge.call("library.listDocs", { path }); }
+        }
+        if (!searchMode) renderFileTree(els.body);
+        return;
       }
-      if (sidebarTab === "files" && !searchMode) renderFileTree();
-      return;
-    }
-    const file = e.target.closest(".bm-tree-file, .bm-search-hit");
-    if (file) {
-      currentFilePath = file.dataset.file;
-      Bridge.call("library.openFile", { path: file.dataset.file });
-      if (sidebarTab === "files" && !searchMode) renderFileTree();
-      return;
-    }
-    const item = e.target.closest(".bm-outline-item");
-    if (item) {
-      const target = write().querySelector(`[data-cid="${item.dataset.cid}"]`);
-      if (target) flashJump(target);
-    }
-  });
+      const file = e.target.closest(".bm-tree-file, .bm-search-hit");
+      if (file) {
+        currentFilePath = file.dataset.file;
+        Bridge.call("library.openFile", { path: file.dataset.file });
+        if (!searchMode) renderFileTree(els.body);
+        return;
+      }
+      const item = e.target.closest(".bm-outline-item");
+      if (item) {
+        const target = write().querySelector(`[data-cid="${item.dataset.cid}"]`);
+        if (target) flashJump(target);
+      }
+    });
+    bindResizer(els.resizer, side);
+    bindTabDrag(els.panel.querySelector(".bm-sidebar-tabs"), side);
+  }
   const input = document.getElementById("bm-search-input");
   let timer = null;
   input.addEventListener("input", () => {
@@ -1298,7 +1439,7 @@ Bridge.register("library.onRoot", data => {
 Bridge.register("library.onDocs", data => {
   dirCache.set(data.dir, data.entries || []);
   fileTreeLoaded = true;
-  if (sidebarOpen && sidebarTab === "files" && !searchMode) renderFileTree();
+  if (sidebarOpen && !searchMode) renderFileTree();
 });
 Bridge.register("globalSearch.onResults", data => {
   if (data.seq !== searchSeq) return;   // 过期结果丢弃
@@ -1317,6 +1458,9 @@ window.Editor = {
   toast, markSaved,
   toggleSidebar,
   setSidebarTab,
+  moveSidebarTab,
+  setSidebarWidth,
+  sidebarState: () => ({ layout: { ...sidebarLayout }, active: { ...panelActive }, widths: { ...sidebarWidths }, open: sidebarOpen }),
   toggleTypewriter,
   toggleFocusMode,
   format,

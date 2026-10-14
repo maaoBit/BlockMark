@@ -6,21 +6,24 @@
 <link rel="stylesheet" href="editor.css">
 </head>
 <body>
-<div id="bm-sidebar" class="bm-sidebar" style="display:none">
-  <div class="bm-sidebar-tabs">
-    <button class="bm-sidebar-tab active" data-tab="files">文件</button>
-    <button class="bm-sidebar-tab" data-tab="outline">大纲</button>
-  </div>
-  <div class="bm-sidebar-search">
+<div id="bm-sidebar" class="bm-sidebar" data-side="left" style="display:none">
+  <div class="bm-sidebar-tabs"></div>
+  <div id="bm-search-wrap" class="bm-sidebar-search">
     <input id="bm-search-input" type="text" placeholder="搜索当前文件夹…" spellcheck="false">
   </div>
   <div id="bm-sidebar-body" class="bm-sidebar-body"></div>
 </div>
+<div id="bm-resizer-left" class="bm-sidebar-resizer" style="display:none"></div>
 <div id="bm-main" class="bm-main">
   <div id="write" class="write" contenteditable="false" spellcheck="true"></div>
   <div id="bm-source-wrap" style="display:none;flex:1;min-height:0;">
     <textarea id="bm-source" class="bm-source" style="display:none" spellcheck="false"></textarea>
   </div>
+</div>
+<div id="bm-resizer-right" class="bm-sidebar-resizer" style="display:none"></div>
+<div id="bm-sidebar-right" class="bm-sidebar" data-side="right" style="display:none">
+  <div class="bm-sidebar-tabs"></div>
+  <div id="bm-sidebar-body-right" class="bm-sidebar-body"></div>
 </div>
 <div id="bm-status" class="bm-status"></div>
 <script type="module" src="editor/editor.js"></script>

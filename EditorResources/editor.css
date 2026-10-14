@@ -228,10 +228,22 @@ body { flex-direction: row; }
   background: var(--bg-dim); border-right: 1px solid var(--border);
   height: 100vh; overflow: hidden; user-select: none;
 }
+.bm-sidebar[data-side="right"] { border-right: none; border-left: 1px solid var(--border); }
 .bm-sidebar-tabs { display: flex; padding: 8px 8px 0; gap: 4px; }
+/* 边界拖宽手柄 */
+.bm-sidebar-resizer {
+  width: 6px; flex: none; cursor: col-resize;
+  background: transparent; transition: background .12s;
+}
+.bm-sidebar-resizer:hover, body.bm-resizing .bm-sidebar-resizer { background: var(--accent); opacity: .4; }
+body.bm-resizing { cursor: col-resize; user-select: none; }
+body.bm-dragging-tab { cursor: grabbing; user-select: none; }
+/* tab 拖拽落点提示（对侧面板高亮；空侧临时展开为窄落点条） */
+.bm-sidebar.bm-drop-hint { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--block-hover); }
 .bm-sidebar-tab {
   flex: 1; padding: 4px 0; font-size: 12px; color: var(--fg-dim);
-  background: transparent; border: none; border-radius: 5px 5px 0 0; cursor: pointer;
+  background: transparent; border: none; border-radius: 5px 5px 0 0; cursor: grab;
+  touch-action: none;
 }
 .bm-sidebar-tab.active { color: var(--fg); background: var(--bg); font-weight: 600; }
 .bm-sidebar-search { padding: 8px; }
