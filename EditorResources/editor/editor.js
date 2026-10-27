@@ -5,7 +5,7 @@
 //     光标落在语法结构内时加亮 —— M1 行内就地编辑）
 //   - 代码块编辑态内嵌 CodeMirror（M2），渲染态 runMode 语法高亮
 //   - 事实源是块对象的 source 字段，DOM 由它派生
-import { parseBlocks, serializeBlocks, reclassify, mathTex, toggleTaskItem, tableGetCell, tableSetCell, tableParse, tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol } from "./parser.js";
+import { parseBlocks, serializeBlocks, reclassify, classifyBlock, mathTex, toggleTaskItem, tableGetCell, tableSetCell, tableParse, tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol } from "./parser.js";
 import { renderInline, renderTable, escapeHtml, highlightEditableSource } from "./inline.js";
 
 const write = () => document.getElementById("write");
@@ -246,13 +246,21 @@ function updateMarksActive() {
 function findBlock(cid) { return blocks.find(b => b.cid === cid); }
 
 function enterEdit(cid, atEnd = true) {
-  const b = findBlock(cid);
+  let b = findBlock(cid);
   if (!b) return;
   lastFocusedCid = cid;
-  commitEditing();
+  // 代码/公式块优先走 CM（含围栏行回车转换：此时 cid 可能正是编辑中的块，自重入快捷路径不得拦在前面）
   if ((b.type === "code" || b.type === "math") && window.CodeMirror) { mountCmBlock(b, b.type); return; }
+  if (editingCid === cid) {   // 已在该块编辑态（空白点击复用空段等）：只归位光标，不走提交（空块会被自删）
+    const self = write().querySelector(`[data-cid="${cid}"]`);
+    if (self) { placeCaret(self, atEnd); return; }
+  }
+  commitEditing();
+  b = findBlock(cid);         // commitEditing 可能删掉目标块（如空块自删）——重解析防悬垂
+  if (!b) return;
   editingCid = cid;
   const el = write().querySelector(`[data-cid="${cid}"]`);
+  if (!el) return;
   el.classList.add("bm-editing");
   el.contentEditable = "true";
   el.innerHTML = highlightEditableSource(b.source);
@@ -281,8 +289,13 @@ function mountCmBlock(b, kind) {
   });
   const langInput = el.querySelector(".bm-lang-input");
   editingCm = { cid: b.cid, cm, langInput, kind };
-  cm.on("blur", () => setTimeout(() => { if (editingCm && document.activeElement !== editingCm.langInput) commitEditing(); }, 150));
-  if (langInput) langInput.addEventListener("blur", () => setTimeout(() => { if (editingCm && !editingCm.cm.hasFocus()) commitEditing(); }, 150));
+  // blur 延迟提交须校验身份：定时器跨块存活时 editingCm 可能已换人（前一个 CM 的陈旧回调不得提交新 CM）
+  cm.on("blur", () => setTimeout(() => {
+    if (editingCm && editingCm.cm === cm && document.activeElement !== editingCm.langInput) commitEditing();
+  }, 150));
+  if (langInput) langInput.addEventListener("blur", () => setTimeout(() => {
+    if (editingCm && editingCm.langInput === langInput && !editingCm.cm.hasFocus()) commitEditing();
+  }, 150));
   cm.focus();
 }
 
@@ -320,7 +333,9 @@ function commitEditing() {
   const el = write().querySelector(`[data-cid="${editingCid}"]`);
   editingCid = null;
   if (!b || !el) return;
-  const newSource = el.textContent.replace(/\u00a0/g, " ");
+  // "编辑态 el 的 textContent == 源码" 只在可编辑时成立；若期间块被重渲染成渲染态
+  // （如围栏转换 renderAll 后），可见文本不是源码 —— 以 b.source 为准，禁止回写清空
+  const newSource = el.isContentEditable ? el.textContent.replace(/\u00a0/g, " ") : b.source;
   el.contentEditable = "false";
   el.classList.remove("bm-editing");
   syncFocusHighlight();
@@ -383,7 +398,7 @@ let savedTick = "";
 function updateStatus() {
   const el = document.getElementById("bm-status");
   if (!el) return;
-  const text = getMarkdown();
+  const text = liveMarkdown();
   const cjk = (text.match(/[\u4e00-\u9fff\u3040-\u30ff]/g) || []).length;
   const words = (text.replace(/[\u4e00-\u9fff\u3040-\u30ff]/g, " ").match(/[A-Za-z0-9_'-]+/g) || []).length;
   el.textContent = `${blocks.length} 块 · ${cjk + words} 字 · ${text.split("\n").length} 行${savedTick}`;
@@ -456,6 +471,21 @@ function format(cmd) {
   if (heads.includes(cmd)) {
     pushHistory();
     const lvl = +cmd[1];
+    if (editingCid === targetCid) {
+      // 编辑中：以 DOM 活文本为基准就地变换，保持编辑态与光标（rerender 会打断编辑）
+      const edEl = write().querySelector(`[data-cid="${targetCid}"]`);
+      if (!edEl) return;
+      const live = edEl.textContent.replace(/\u00a0/g, " ").replace(/^#{1,6}\s+/, "");
+      b.source = "#".repeat(lvl) + " " + live;
+      reclassify(b);
+      edEl.dataset.type = b.type;
+      if (b.level) edEl.dataset.level = String(b.level); else delete edEl.dataset.level;
+      edEl.innerHTML = highlightEditableSource(b.source);
+      placeCaret(edEl, true);
+      updateMarksActive();
+      notifyChanged();
+      return;
+    }
     b.source = b.source.replace(/^#{1,6}\s+/, "").replace(/^(?=#)/, "#".repeat(lvl) + " ");
     reclassify(b);
     rerenderBlock(b);
@@ -918,6 +948,27 @@ function bindEvents() {
       const cur = findBlock(cid);
       cur.source = el.textContent.replace(/\u00a0/g, " ");
       reclassify(cur);
+      // 围栏/公式定界行 + Enter：整块即转代码/公式并进 CM（Typora 流程）。
+      // 仅光标在行尾（after 为空）时转换，行中回车仍走常规拆块。
+      if (after === "") {
+        const fm = cur.source.match(/^```([A-Za-z0-9_+-]*)$/);
+        if (fm) {
+          cur.source = "```" + fm[1] + "\n```";
+          reclassify(cur);
+          renderAll();
+          enterEdit(cur.cid);   // code → 挂 CodeMirror
+          notifyChanged();
+          return;
+        }
+        if (cur.source === "$$") {
+          cur.source = "$$\n$$";
+          reclassify(cur);
+          renderAll();
+          enterEdit(cur.cid);   // math → 挂 TeX CM
+          notifyChanged();
+          return;
+        }
+      }
       // 同类编辑器惯例：回车延续列表/引用前缀；前缀空项回车 → 消除前缀成段落
       let prefix = "";
       const pm = cur.source.match(/^(\s*)([-*+]\s+|\d+[.)]\s+|>\s?)/);
@@ -945,18 +996,52 @@ function bindEvents() {
       notifyChanged();
       return;
     }
-    if (e.key === "Backspace" && caretAtStart(blockEl) && blockEl.textContent === "" && !e.isComposing) {
-      e.preventDefault();
-      pushHistory();
-      const prevCid = blocks[blocks.findIndex(x => x.cid === cid) - 1]?.cid;   // 删除前记前块
-      blocks = blocks.filter(x => x.cid !== cid);
-      editingCid = null;
-      renderAll();
-      if (!blocks.length) blocks = [{ cid: newCid(), type: "paragraph", source: "" }];
-      if (prevCid && findBlock(prevCid)) enterEdit(prevCid);
-      else enterEdit(blocks[blocks.length - 1].cid);
-      notifyChanged();
-      return;
+    if (e.key === "Backspace" && caretAtStart(blockEl) && !e.isComposing) {
+      const idx = blocks.findIndex(x => x.cid === cid);
+      if (blockEl.textContent === "") {
+        // 空块删除：唯一块删后必须 renderAll 再进编辑（曾因补块不重渲染 → enterEdit 空指针 → 编辑器假死）
+        e.preventDefault();
+        pushHistory();
+        const prevCid = blocks[idx - 1]?.cid;   // 删除前记前块
+        blocks = blocks.filter(x => x.cid !== cid);
+        editingCid = null;
+        if (!blocks.length) blocks = [{ cid: newCid(), type: "paragraph", source: "" }];
+        renderAll();
+        if (prevCid && findBlock(prevCid)) enterEdit(prevCid);
+        else enterEdit(blocks[blocks.length - 1].cid);
+        notifyChanged();
+        return;
+      }
+      if (idx > 0) {
+        // 行首退格：并块（Typora 式）—— 文本型前块直接拼源码、光标停拼接点；
+        // 表格进末格、代码/公式进 CM；其余（hr/frontmatter）进其末尾
+        const prev = blocks[idx - 1];
+        e.preventDefault();
+        const curSrc = blockEl.textContent.replace(/\u00a0/g, " ");
+        if (["paragraph", "heading", "quote", "ul", "ol", "footnote"].includes(prev.type)) {
+          pushHistory();
+          editingCid = null;
+          const joinAt = prev.source.length;
+          prev.source += curSrc;
+          reclassify(prev);
+          blocks.splice(idx, 1);
+          renderAll();
+          enterEdit(prev.cid);
+          setCaretTextOffset(write().querySelector(`[data-cid="${prev.cid}"]`), joinAt);
+          notifyChanged();
+        } else if (prev.type === "table") {
+          commitEditing();
+          const t = tableParse(prev.source);
+          const blockEl2 = write().querySelector(`[data-cid="${prev.cid}"]`);
+          const rr = t ? t.rows.length - 1 : 0;
+          const td = blockEl2 && t && blockEl2.querySelector(`[data-r="${rr}"][data-c="${(t.rows[rr] || []).length - 1}"]`);
+          if (td) enterCellEdit(blockEl2, td); else enterEdit(prev.cid, true);
+        } else {
+          commitEditing();
+          enterEdit(prev.cid, true);   // code/math → CM 挂载，光标在末尾
+        }
+        return;
+      }
     }
     if (e.key === "ArrowUp" && caretAtStart(blockEl)) {
       if (focusSibling(cid, -1, true)) e.preventDefault();
@@ -1076,6 +1161,7 @@ function bindEvents() {
     const blockEl = e.target.closest ? e.target.closest(".bm-block") : null;
     if (blockEl && blockEl.dataset.cid === editingCid) {
       setTimeout(() => {
+        if (!blockEl.isConnected) return;   // 期间块被重渲染/重建（同 cid 新 el）：脱钩 el 不代表当前编辑态
         const sel = getSelection();
         if (!sel.anchorNode || !blockEl.contains(sel.anchorNode)) commitEditing();
       }, 0);
@@ -1083,14 +1169,43 @@ function bindEvents() {
   });
 }
 
+// Typora 式活体形态：编辑中每次重高亮都按当前源码重分类块并同步 data-type/level，
+// 行首语法（# / - / > / --- …）敲下即改变块排印（CSS 按 data-type 走编辑态字号）。
+// 注意 b.source 保持"上次提交值"不动 —— commitEditing 靠它与 DOM 文本的差异驱动
+// pushHistory/notifyChanged（自动保存/undo 的事实源）；活文本经 liveMarkdown() 取数。
 function relightEditing() {
   if (!editingCid) return;
   const el = write().querySelector(`[data-cid="${editingCid}"]`);
   if (!el) return;
+  const src = el.textContent.replace(/\u00a0/g, " ");
+  const b = findBlock(editingCid);
+  if (b) {
+    const info = classifyBlock(src);
+    b.type = info.type;
+    if (info.type === "heading") b.level = info.level; else delete b.level;
+    if (info.type === "code") b.lang = info.lang; else delete b.lang;
+    if (info.tasks) b.tasks = true; else delete b.tasks;
+    el.dataset.type = b.type;
+    if (b.level) el.dataset.level = String(b.level); else delete el.dataset.level;
+  }
   const off = caretTextOffset(el);
-  el.innerHTML = highlightEditableSource(el.textContent);
+  el.innerHTML = highlightEditableSource(src);
   if (off !== null) setCaretTextOffset(el, off);
   updateMarksActive();
+  updateStatus();
+}
+
+// 序列化时以编辑中块的 DOM 活文本替换其旧 source（状态栏实时字数/块型）
+function liveMarkdown() {
+  if (!editingCid) return getMarkdown();
+  const b = findBlock(editingCid);
+  const el = write().querySelector(`[data-cid="${editingCid}"]`);
+  if (!b || !el) return getMarkdown();
+  const saved = b.source;
+  b.source = el.textContent.replace(/\u00a0/g, " ");
+  const md = getMarkdown();
+  b.source = saved;
+  return md;
 }
 
 function caretAtStart(el) {
