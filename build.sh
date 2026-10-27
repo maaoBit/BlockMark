@@ -8,7 +8,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 echo "== swiftc =="
-swiftc -O \
+# 钉部署目标：新版 swiftc 默认 target 跳到 macosx28.0（LC_BUILD_VERSION minos 28），
+# 低于该版本的系统 LaunchServices 报 kLSIncompatibleSystemVersionErr(-10825) 拒启
+swiftc -O -target arm64-apple-macos13.0 \
   -o "$APP/Contents/MacOS/BlockMark" \
   app/main.swift app/AppDelegate.swift app/Document.swift app/DocumentFileWatcher.swift app/EditorWindowController.swift app/Updater.swift \
   -framework Cocoa -framework WebKit
