@@ -5,7 +5,7 @@
 //     光标落在语法结构内时加亮 —— M1 行内就地编辑）
 //   - 代码块编辑态内嵌 CodeMirror（M2），渲染态 runMode 语法高亮
 //   - 事实源是块对象的 source 字段，DOM 由它派生
-import { parseBlocks, serializeBlocks, reclassify, mathTex, toggleTaskItem, tableGetCell, tableSetCell } from "./parser.js";
+import { parseBlocks, serializeBlocks, reclassify, mathTex, toggleTaskItem, tableGetCell, tableSetCell, tableParse, tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol } from "./parser.js";
 import { renderInline, renderTable, escapeHtml, highlightEditableSource } from "./inline.js";
 
 const write = () => document.getElementById("write");
@@ -569,6 +569,81 @@ function moveCellTo(cid, r, c) {
   if (blockEl) enterCellEdit(blockEl, blockEl.querySelector(`[data-r="${r}"][data-c="${c}"]`));
 }
 
+// 空白区点击（#write 的 padding / 两侧留白没有块可点；空文档整页几乎都是死区）
+// 命中块竖直范围 → 进该块；点在首块之上 → 首块开头；块下方 → 段落收光标 / 其余类型补空段
+function focusBlankAreaAt(y) {
+  const els = [...write().querySelectorAll(".bm-block")];
+  if (!els.length) return;
+  if (y < els[0].getBoundingClientRect().top) { enterEdit(blocks[0].cid, false); return; }
+  let hit = null, above = null;
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (y >= r.top && y <= r.bottom) { hit = el; break; }
+    if (r.bottom <= y) above = el;
+  }
+  if (hit) { enterEdit(hit.dataset.cid, true); return; }
+  if (above) {
+    const b = findBlock(above.dataset.cid);
+    if (b && b.type === "paragraph") { enterEdit(b.cid, true); return; }
+    insertParagraphAfterBlock(b.cid);
+  }
+}
+
+function insertParagraphAfterBlock(cid) {
+  const idx = blocks.findIndex(x => x.cid === cid);
+  if (idx === -1) return;
+  const last = blocks[idx];
+  if (idx === blocks.length - 1 && last.type === "paragraph" && last.source === "") {
+    enterEdit(last.cid, true);
+    return;
+  }
+  const nb = { cid: newCid(), type: "paragraph", source: "" };
+  pushHistory();
+  blocks.splice(idx + 1, 0, nb);
+  renderAll();
+  enterEdit(nb.cid);
+}
+
+// ---------- 表格结构编辑（右键菜单命令；操作后光标进焦点格续写） ----------
+
+function runTableCommand(cmd, data) {
+  const cid = data.cid || "";
+  const b = findBlock(cid);
+  if (!b || b.type !== "table") return;
+  const r = +data.tr, c = +data.tc;
+  if (cellEditing && cellEditing.cid === cid) commitCellEdit();
+  if (cmd === "table.deleteTable") {
+    pushHistory();
+    blocks = blocks.filter(x => x.cid !== cid);
+    if (!blocks.length) blocks = [{ cid: newCid(), type: "paragraph", source: "" }];
+    renderAll();
+    notifyChanged();
+    return;
+  }
+  let next = null, focusAt = null;
+  switch (cmd) {
+    case "table.insertRowAbove": next = tableInsertRow(b.source, r); focusAt = { r, c }; break;
+    case "table.insertRowBelow": next = tableInsertRow(b.source, r + 1); focusAt = { r: r + 1, c }; break;
+    case "table.deleteRow": next = tableDeleteRow(b.source, r); focusAt = { r: Math.max(1, r), c }; break;
+    case "table.insertColLeft": next = tableInsertCol(b.source, c); focusAt = { r, c }; break;
+    case "table.insertColRight": next = tableInsertCol(b.source, c + 1); focusAt = { r, c: c + 1 }; break;
+    case "table.deleteCol": next = tableDeleteCol(b.source, c); focusAt = { r, c }; break;
+  }
+  if (next === null || next === b.source) return;   // 越界/守卫命中 → 无操作
+  pushHistory();
+  b.source = next;
+  reclassify(b);
+  rerenderBlock(b);
+  notifyChanged();
+  const t = tableParse(b.source);
+  if (!t || !focusAt) return;
+  const rr = Math.min(focusAt.r, t.rows.length - 1);
+  const cc = Math.min(focusAt.c, Math.max(...t.rows.map(row => row.length)) - 1);
+  const blockEl = write().querySelector(`[data-cid="${cid}"]`);
+  const td = blockEl && blockEl.querySelector(`[data-r="${rr}"][data-c="${cc}"]`);
+  if (td) enterCellEdit(blockEl, td);
+}
+
 // ---------- 查找 ⌘F ----------
 
 let findHits = [];
@@ -701,6 +776,7 @@ function bindEvents() {
 
   w.addEventListener("mousedown", e => {
     if (sourceMode) return;
+    if (e.button !== 0) return;   // 右键交给 contextmenu（不再闪现源码编辑态）；中键系统自理
     const blockEl = e.target.closest(".bm-block");
     if (!blockEl) return;
     const a = e.target.closest("a");
@@ -756,6 +832,15 @@ function bindEvents() {
       e.preventDefault();
       enterEdit(blockEl.dataset.cid);
     }
+  });
+
+  // 空白区点击兜底（挂在滚动容器上，覆盖 #write padding 与两侧留白；块内点击已被上方处理器消费）
+  scroller().addEventListener("mousedown", e => {
+    if (sourceMode || e.button !== 0) return;
+    if (e.target.closest(".bm-block") || e.target.closest("#bm-source-wrap")) return;
+    if (!blocks.length) return;
+    e.preventDefault();
+    focusBlankAreaAt(e.clientY);
   });
 
   w.addEventListener("keydown", e => {
@@ -938,12 +1023,31 @@ function bindEvents() {
     if (a) items.push({ sep: true }, { cmd: "openLink", label: "打开链接" }, { cmd: "copyLink", label: "拷贝链接地址" });
     if (img) items.push({ sep: true }, { cmd: "copyImg", label: "拷贝图片地址" }, { cmd: "saveImg", label: "存储图片为…" });
     if (hasSel) items.push({ sep: true }, { cmd: "bold", label: "加粗" }, { cmd: "italic", label: "斜体" });
-    Bridge.call("menu.showContext", {
+    // 表格结构编辑：表头行（r=0）不可删/不可上方插；仅剩一列时不可删列
+    const td = e.target.closest("td[data-r], th[data-r]");
+    let tr, tc;
+    if (td && blockEl.dataset.type === "table") {
+      tr = +td.dataset.r; tc = +td.dataset.c;
+      const t = tableParse(findBlock(blockEl.dataset.cid)?.source || "");
+      const cols = t ? Math.max(...t.rows.map(row => row.length)) : 0;
+      items.push({ sep: true });
+      if (tr >= 1) items.push({ cmd: "table.insertRowAbove", label: "在上方插入行" });
+      items.push({ cmd: "table.insertRowBelow", label: "在下方插入行" });
+      if (tr >= 1) items.push({ cmd: "table.deleteRow", label: "删除此行" });
+      items.push({ sep: true });
+      items.push({ cmd: "table.insertColLeft", label: "在左侧插入列" });
+      items.push({ cmd: "table.insertColRight", label: "在右侧插入列" });
+      if (cols > 1) items.push({ cmd: "table.deleteCol", label: "删除此列" });
+      items.push({ sep: true }, { cmd: "table.deleteTable", label: "删除表格" });
+    }
+    const payload = {
       items,
       link: a ? (a.getAttribute("href") || "") : "",
       img: img ? (img.dataset.raw || img.getAttribute("src") || "") : "",
       cid: blockEl.dataset.cid,
-    });
+    };
+    if (td && blockEl.dataset.type === "table") { payload.tr = tr; payload.tc = tc; }
+    Bridge.call("menu.showContext", payload);
   });
 
   // 光标移动 → 定界符激活窗口刷新
@@ -1412,9 +1516,24 @@ Bridge.register("doc.baseDir", data => {
 // 原生 → JS：右键菜单命令回推
 Bridge.register("menu.onCommand", data => {
   const cmd = data.cmd || "";
+  if (cmd.startsWith("table.")) { runTableCommand(cmd, data); return; }
   if (cmd === "paste" && typeof data.text === "string") {
+    // 表格格坐标在 → 进格粘贴（菜单弹窗已吹走原焦点，重定位到右键格）
+    if (data.cid && Number.isInteger(+data.tr) && Number.isInteger(+data.tc)) {
+      const blockEl = write().querySelector(`[data-cid="${data.cid}"]`);
+      const td = blockEl && blockEl.querySelector(
+        `td[data-r="${data.tr}"][data-c="${data.tc}"], th[data-r="${data.tr}"][data-c="${data.tc}"]`);
+      if (td) { enterCellEdit(blockEl, td); insertPastedText(td, data.text); return; }
+    }
     const el = editingCid ? write().querySelector(`[data-cid="${editingCid}"]`) : null;
-    if (el) insertPastedText(el, data.text);
+    if (el) { insertPastedText(el, data.text); return; }
+    if (data.cid) {   // 右键不再预进编辑态：按 cid 进块后落剪贴板文本
+      enterEdit(data.cid);
+      setTimeout(() => {
+        const t = write().querySelector(`[data-cid="${data.cid}"]`);
+        if (t) insertPastedText(t, data.text);
+      }, 30);
+    }
     return;
   }
   if (cmd === "bold" || cmd === "italic") {

@@ -110,6 +110,44 @@ t("竖线转义往返", tableGetCell(set2, 0, 1) === "a|b" && set2.split("\n")[0
 t("非表格返回原样", tableSetCell("普通段落", 0, 0, "x") === "普通段落");
 t("renderTable 单元格坐标", renderTable(SRC).includes('data-r="2" data-c="1"'));
 
+console.log("== 表格结构编辑（右键菜单增删行列）");
+const {
+  tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol,
+} = await import("../EditorResources/editor/parser.js");
+// SRC: 表头 A|B（居中|右对齐），数据行 1|2 / 3|4
+t("插行(首数据行前)", tableGetCell(tableInsertRow(SRC, 1), 1, 0) === "" && tableGetCell(tableInsertRow(SRC, 1), 2, 0) === "1",
+  tableInsertRow(SRC, 1));
+t("插行(末行后)", (() => { const s = tableInsertRow(SRC, 3); return tableParse(s).rows.length === 4 && tableGetCell(s, 3, 1) === ""; })(),
+  tableInsertRow(SRC, 3));
+t("插行守卫: at=0(表头上方)不变", tableInsertRow(SRC, 0) === SRC);
+t("插行守卫: 越界不变", tableInsertRow(SRC, 9) === SRC);
+t("插行守卫: 非表格不变", tableInsertRow("普通", 1) === "普通");
+const delRow = tableDeleteRow(SRC, 1);
+t("删数据行", tableParse(delRow).rows.length === 2 && tableGetCell(delRow, 1, 0) === "3", delRow);
+t("删行守卫: 表头不可删", tableDeleteRow(SRC, 0) === SRC);
+t("删行守卫: 越界不变", tableDeleteRow(SRC, 5) === SRC);
+const insCol = tableInsertCol(SRC, 1);
+t("插列(右)", (() => { const p = tableParse(insCol); return p.rows[0].length === 3 && tableGetCell(insCol, 0, 0) === "A" && tableGetCell(insCol, 0, 1) === "" && tableGetCell(insCol, 0, 2) === "B"; })(), insCol);
+t("插列继承右邻对齐", tableParse(insCol).aligns.join(",") === "center,right,right", tableParse(insCol).aligns.join(","));
+const insColAppend = tableInsertCol(SRC, 2);
+t("插列(追加)复制末列对齐", tableParse(insColAppend).aligns.join(",") === "center,right,right", tableParse(insColAppend).aligns.join(","));
+const insColL = tableInsertCol(SRC, 0);
+t("插列(左)继承原首列对齐", tableParse(insColL).aligns.join(",") === "center,center,right", tableParse(insColL).aligns.join(","));
+t("插列守卫: 越界不变", tableInsertCol(SRC, 3) === SRC);
+const delCol = tableDeleteCol(SRC, 0);
+t("删列", (() => { const p = tableParse(delCol); return p.rows[0].length === 1 && tableGetCell(delCol, 0, 0) === "B"; })(), delCol);
+t("删列掉对应对齐", tableParse(delCol).aligns.join(",") === "right");
+t("删列守卫: 最后一列不可删", tableDeleteCol("| A |\n|---|\n| 1 |", 0) === "| A |\n|---|\n| 1 |");
+t("删列守卫: 越界不变", tableDeleteCol(SRC, 5) === SRC);
+// 序列化统一转义回归：编辑一格不得丢失其他格的 \| 转义
+const pipeSrc = "| a\\|b | B |\n|---|---|\n| 1 | 2 |";
+const pipeSet = tableSetCell(pipeSrc, 1, 1, "改");
+t("写一格不破坏他格竖线转义", tableGetCell(pipeSet, 0, 0) === "a|b" && pipeSet.split("\n")[0].includes("a\\|b"), pipeSet);
+const pipeIns = tableInsertRow(pipeSrc, 1);
+t("插行不破坏竖线转义", tableGetCell(pipeIns, 0, 0) === "a|b" && pipeIns.split("\n")[0].includes("a\\|b"), pipeIns);
+// 全空行仍可被 parseBlocks 识别为表格行
+t("空行表格分类保持", parseBlocks(tableInsertRow(SRC, 1) + "\n")[0].type === "table", tableInsertRow(SRC, 1));
+
 console.log("== 边界");
 t("空文档给单空段落", parseBlocks("").length === 1 && parseBlocks("")[0].type === "paragraph");
 t("CRLF 归一", parseBlocks("a\r\n\r\nb").length === 2);

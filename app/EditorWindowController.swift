@@ -255,11 +255,15 @@ final class EditorWindowController: NSWindowController {
     private var ctxLink = ""
     private var ctxImg = ""
     private var ctxCid = ""
+    private var ctxTr = -1   // 右键落在表格格内时的行/列（-1 = 非表格）
+    private var ctxTc = -1
 
     private func handleContextMenu(_ data: [String: Any]) {
         ctxLink = data["link"] as? String ?? ""
         ctxImg = data["img"] as? String ?? ""
         ctxCid = data["cid"] as? String ?? ""
+        ctxTr = data["tr"] as? Int ?? -1
+        ctxTc = data["tc"] as? Int ?? -1
         let items = data["items"] as? [[String: Any]] ?? []
         let menu = NSMenu()
         for it in items {
@@ -284,7 +288,9 @@ final class EditorWindowController: NSWindowController {
             pushJs("document.execCommand('copy')")
         case "paste":
             let text = NSPasteboard.general.string(forType: .string) ?? ""
-            dispatchToJs("menu.onCommand", ["cmd": "paste", "text": text])
+            var payload: [String: Any] = ["cmd": "paste", "text": text, "cid": ctxCid]
+            if ctxTr >= 0 && ctxTc >= 0 { payload["tr"] = ctxTr; payload["tc"] = ctxTc }
+            dispatchToJs("menu.onCommand", payload)
         case "openLink":
             if let url = URL(string: ctxLink),
                ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") {
@@ -298,6 +304,11 @@ final class EditorWindowController: NSWindowController {
             saveImageAs()
         case "bold", "italic":
             dispatchToJs("menu.onCommand", ["cmd": sender.representedObject ?? "", "cid": ctxCid])
+        case let cmd where cmd.hasPrefix("table."):
+            // 表格结构命令（插行/删行/插列/删列/删表），JS 侧按 tr/tc 定位
+            var payload: [String: Any] = ["cmd": cmd, "cid": ctxCid]
+            if ctxTr >= 0 && ctxTc >= 0 { payload["tr"] = ctxTr; payload["tc"] = ctxTc }
+            dispatchToJs("menu.onCommand", payload)
         default:
             break
         }

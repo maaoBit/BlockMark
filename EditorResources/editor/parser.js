@@ -197,20 +197,70 @@ export function tableGetCell(source, r, c) {
   return t.rows[r][c] ?? "";
 }
 
-// 写单元格（| 转义），重拼全表（对齐行补齐列数）
-export function tableSetCell(source, r, c, text) {
-  const t = tableParse(source);
-  if (!t || !t.rows[r]) return source;
-  t.rows[r][c] = text.replace(/\|/g, "\\|");
+// 表对象 → 源文本。parse 时已还原 \| → 序列化统一重转义每格
+// （旧实现只转义被写的那格，其余含 \| 的格会在重拼时丢失转义被拆列）
+function tableSerialize(t) {
   const width = Math.max(...t.rows.map(row => row.length));
   const aligns = t.aligns.slice();
   while (aligns.length < width) aligns.push("left");
+  if (aligns.length > width) aligns.length = width;
   const lines = t.rows.map(row => {
     const padded = row.slice();
     while (padded.length < width) padded.push("");
-    return "| " + padded.join(" | ") + " |";
+    return "| " + padded.map(cell => cell.replace(/\|/g, "\\|")).join(" | ") + " |";
   });
   const alignLine = "| " + aligns.map(a =>
     a === "center" ? ":---:" : a === "right" ? "---:" : "---").join(" | ") + " |";
   return [lines[0], alignLine, ...lines.slice(1)].join("\n");
+}
+
+// 写单元格（cells 存未转义原文，转义统一由 tableSerialize 收口）
+export function tableSetCell(source, r, c, text) {
+  const t = tableParse(source);
+  if (!t || !t.rows[r]) return source;
+  t.rows[r][c] = text;
+  return tableSerialize(t);
+}
+
+// ---------- 表格结构编辑（右键菜单增删行列） ----------
+// 行坐标同单元格编辑：r=0 表头，数据行从 1；表头不可删、不可在其上方插行
+
+export function tableInsertRow(source, at) {
+  const t = tableParse(source);
+  if (!t || !Number.isInteger(at) || at < 1 || at > t.rows.length) return source;
+  const width = Math.max(...t.rows.map(row => row.length));
+  t.rows.splice(at, 0, new Array(width).fill(""));
+  return tableSerialize(t);
+}
+
+export function tableDeleteRow(source, r) {
+  const t = tableParse(source);
+  if (!t || !Number.isInteger(r) || r < 1 || r >= t.rows.length) return source;
+  t.rows.splice(r, 1);
+  return tableSerialize(t);
+}
+
+export function tableInsertCol(source, at) {
+  const t = tableParse(source);
+  if (!t || !Number.isInteger(at) || at < 0) return source;
+  const width = Math.max(...t.rows.map(row => row.length));
+  if (at > width) return source;
+  for (const row of t.rows) {
+    while (row.length < width) row.push("");
+    row.splice(at, 0, "");
+  }
+  // 新列继承右邻对齐（追加时复制末列）
+  const ref = t.aligns[Math.min(at, t.aligns.length - 1)] || "left";
+  t.aligns.splice(at, 0, ref);
+  return tableSerialize(t);
+}
+
+export function tableDeleteCol(source, c) {
+  const t = tableParse(source);
+  if (!t || !Number.isInteger(c) || c < 0) return source;
+  const width = Math.max(...t.rows.map(row => row.length));
+  if (width <= 1 || c >= width) return source;   // 最后一列不可删
+  for (const row of t.rows) row.splice(c, 1);
+  t.aligns.splice(c, 1);
+  return tableSerialize(t);
 }
