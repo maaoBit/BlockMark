@@ -109,6 +109,7 @@ function renderAll() {
   enhanceCodeBlocks();
   enhanceMath();
   enhanceImages();
+  enhanceTables();
 }
 
 function rerenderBlock(b) {
@@ -118,6 +119,7 @@ function rerenderBlock(b) {
   enhanceCodeBlocks();
   enhanceMath();
   enhanceImages();
+  enhanceTables();
 }
 
 // 图片相对路径 → 文档目录绝对 file URL（base 由原生 doc.baseDir 推送）
@@ -132,6 +134,19 @@ function enhanceImages() {
     if (raw && !/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
       img.src = assetBase ? assetBase + raw.replace(/^\.\//, "") : raw;
     }
+  }
+}
+
+// 表格块挂"放大查看"按钮（hover 浮现；只进活 DOM，导出用 blockHtml 重渲不含按钮）
+function enhanceTables() {
+  for (const el of write().querySelectorAll('.bm-block[data-type="table"]')) {
+    if (el.querySelector(".bm-table-zoom-btn")) continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "bm-table-zoom-btn";
+    btn.title = "放大查看表格";
+    btn.textContent = "\u26F6 \u653E\u5927";
+    el.appendChild(btn);
   }
 }
 
@@ -700,6 +715,7 @@ function runTableCommand(cmd, data) {
   if (!b || b.type !== "table") return;
   const r = +data.tr, c = +data.tc;
   commitEditing();   // 先落所有编辑态活文本（删表 renderAll 会抹掉别处编辑中的 DOM）
+  if (cmd === "table.preview") { openTableZoom(cid); return; }
   if (cmd === "table.deleteTable") {
     pushHistory();
     blocks = blocks.filter(x => x.cid !== cid);
@@ -829,6 +845,42 @@ function closeFindBar() {
   write().focus();
 }
 
+// ---------- 表格放大视图（宽表免横向搓动：hover 按钮 / 右键进入，全屏只读大表） ----------
+
+function openTableZoom(cid) {
+  commitEditing();   // 取最新已提交源码（单元格/块编辑先行落盘）
+  const b = findBlock(cid);
+  if (!b || b.type !== "table") return;
+  let ov = document.getElementById("bm-table-zoom");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "bm-table-zoom";
+    ov.innerHTML = `<div class="bm-table-zoom-card">` +
+      `<div class="bm-table-zoom-bar"><span class="bm-table-zoom-title"></span>` +
+      `<span>只读预览 · Esc 关闭</span><button type="button" title="关闭">\u2715</button></div>` +
+      `<div class="bm-table-zoom-scroll"></div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("mousedown", e => { if (e.target === ov) closeTableZoom(); });   // 点背景关
+    ov.querySelector(".bm-table-zoom-bar button").addEventListener("click", closeTableZoom);
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && document.getElementById("bm-table-zoom")?.classList.contains("show")) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeTableZoom();
+      }
+    }, true);   // 捕获阶段抢在块编辑 Esc 之前
+  }
+  ov.querySelector(".bm-table-zoom-title").textContent = `${tableParse(b.source)?.rows.length || 0} 行`;
+  const scroll = ov.querySelector(".bm-table-zoom-scroll");
+  scroll.innerHTML = renderTable(b.source);
+  for (const cell of scroll.querySelectorAll("td, th")) cell.removeAttribute("contenteditable");   // 只读
+  ov.classList.add("show");
+}
+
+function closeTableZoom() {
+  document.getElementById("bm-table-zoom")?.classList.remove("show");
+}
+
 // ---------- 图片预览（lightbox） ----------
 
 function openLightbox(src) {
@@ -867,6 +919,12 @@ function bindEvents() {
   w.addEventListener("mousedown", e => {
     if (sourceMode) return;
     if (e.button !== 0) return;   // 右键交给 contextmenu（不再闪现源码编辑态）；中键系统自理
+    if (e.target.closest && e.target.closest(".bm-table-zoom-btn")) {
+      e.preventDefault();
+      const blockEl = e.target.closest(".bm-block");
+      if (blockEl) openTableZoom(blockEl.dataset.cid);
+      return;
+    }
     const blockEl = e.target.closest(".bm-block");
     if (!blockEl) return;
     const a = e.target.closest("a");
@@ -1224,7 +1282,7 @@ function bindEvents() {
       items.push({ cmd: "table.insertColLeft", label: "在左侧插入列" });
       items.push({ cmd: "table.insertColRight", label: "在右侧插入列" });
       if (cols > 1) items.push({ cmd: "table.deleteCol", label: "删除此列" });
-      items.push({ sep: true }, { cmd: "table.deleteTable", label: "删除表格" });
+      items.push({ sep: true }, { cmd: "table.preview", label: "放大查看表格" }, { cmd: "table.deleteTable", label: "删除表格" });
     }
     const payload = {
       items,

@@ -366,3 +366,81 @@ td.bm-cell-editing, th.bm-cell-editing {
   text-decoration-thickness: 1.5px;
   color: var(--fg-faint);
 }
+
+/* ---------- M10：表格放大视图（hover 按钮 + 全屏只读大表） ---------- */
+
+.bm-block[data-type="table"] { position: relative; }
+.bm-table-zoom-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 5;
+  display: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 1px 4px var(--shadow);
+}
+.bm-block[data-type="table"]:hover .bm-table-zoom-btn { display: block; }
+.bm-table-zoom-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+#bm-table-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 420;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  cursor: zoom-out;
+}
+#bm-table-zoom.show { display: flex; }
+.bm-table-zoom-card {
+  background: var(--bg);
+  border-radius: 10px;
+  box-shadow: 0 10px 48px rgba(0, 0, 0, 0.5);
+  max-width: 94vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  cursor: default;
+}
+.bm-table-zoom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.bm-table-zoom-bar button {
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--fg-dim);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.bm-table-zoom-bar button:hover { background: var(--hover-bg); color: var(--accent); }
+.bm-table-zoom-scroll {
+  overflow: auto;
+  padding: 16px 18px;
+}
+.bm-table-zoom-scroll table { width: max-content; border-collapse: collapse; font-size: 0.98em; }
+.bm-table-zoom-scroll th, .bm-table-zoom-scroll td {
+  border: 1px solid var(--border);
+  padding: 7px 14px;
+  min-width: 5em;
+  white-space: pre-wrap;
+}
+.bm-table-zoom-scroll th { background: var(--code-bg); position: sticky; top: 0; z-index: 1; }
