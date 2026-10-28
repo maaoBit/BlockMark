@@ -18,7 +18,7 @@ fi
 
 node tools/bundle.mjs || exit 1
 
-SUITES=(m1 cm m2b m3 m45 look tail m6 m7 m8)
+SUITES=(m1 cm m2b m3 m45 look tail m6 m7 m8 m9)
 fail=0
 for g in $SUITES; do
   node "tools/gen-e2e-$g.mjs" >/dev/null || { echo "$g: GEN-FAIL"; fail=1; continue; }

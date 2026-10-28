@@ -26,6 +26,9 @@ final class MarkdownDocument: NSDocument {
     var lastSyncedContent: String = ""
 
     private var autosaveWork: DispatchWorkItem?
+    /// 首次变脏时刻：连续输入不断重排 1s 计时会无限推迟落盘（此窗口崩溃丢整场会话），
+    /// 自此起 5s 内必须冲刷一次
+    private var autosaveFirstDirty: Date?
     private var watcher: DocumentFileWatcher?
     private var conflictNotified = false
     /// 自持窗口控制器：自定义 NSDocumentController 打开路径下 AppKit 会绕过
@@ -134,10 +137,14 @@ final class MarkdownDocument: NSDocument {
     }
 
     private func scheduleAutosave() {
+        if autosaveWork == nil { autosaveFirstDirty = Date() }   // 无在途计时才记首脏
         autosaveWork?.cancel()
+        let firstDirty = autosaveFirstDirty ?? Date()
+        let remaining = 5.0 - Date().timeIntervalSince(firstDirty)
+        let delay = max(0, min(1.0, remaining))
         let work = DispatchWorkItem { [weak self] in self?.flushAutosave() }
         autosaveWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// 立即写盘（窗口关闭/应用退出时冲刷）
@@ -145,6 +152,7 @@ final class MarkdownDocument: NSDocument {
     func flushAutosave() -> Bool {
         autosaveWork?.cancel()
         autosaveWork = nil
+        autosaveFirstDirty = nil
         // 冲突保持中：外部修改只能由用户显式保存（⌘S）决定去留，自动保存让路
         guard !conflictNotified else { return false }
         guard let url = fileURL, markdown != lastSyncedContent else { return false }

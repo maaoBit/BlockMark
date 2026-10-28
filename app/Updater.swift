@@ -170,7 +170,7 @@ final class Updater: NSObject {
                 }
             }
             guard let self else { return }
-            self.busy = false
+            DispatchQueue.main.async { self.busy = false }   // 回调在 session 线程：裸写与主线程 check() 竞态
             if let err { return finish("下载失败：\(err.localizedDescription)") }
             guard let http = resp as? HTTPURLResponse, http.statusCode == 200, let tmp else {
                 return finish("下载失败（HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)）")
@@ -228,14 +228,22 @@ final class Updater: NSObject {
         }
 
         let backup = fm.temporaryDirectory
-            .appendingPathComponent("blockmark-old-\(Int(Date().timeIntervalSince1970)).app")
+            .appendingPathComponent("blockmark-old-\(UUID().uuidString).app")
         try? fm.removeItem(at: backup)
         try fm.moveItem(at: curApp, to: backup)      // 旧包挪走（运行中进程不受影响，inode 仍有效）
         do {
             try fm.moveItem(at: newApp, to: curApp)   // 新包就位
         } catch {
-            try? fm.moveItem(at: backup, to: curApp)  // 回滚
-            throw UpdateError.replaceFailed("无法写入新版本（\(error.localizedDescription)）")
+            do {
+                try fm.moveItem(at: backup, to: curApp)  // 回滚
+                throw UpdateError.replaceFailed("无法写入新版本（\(error.localizedDescription)），已恢复原版本")
+            } catch let rollbackErr as UpdateError {
+                throw rollbackErr
+            } catch {
+                // 回滚也失败：原包已不在位，必须让用户知道并给出手动路径
+                throw UpdateError.replaceFailed(
+                    "无法写入新版本且恢复失败：\(error.localizedDescription)。\n请从 GitHub Releases 手动下载安装（旧包备份在 \(backup.path)）")
+            }
         }
     }
 
@@ -244,13 +252,13 @@ final class Updater: NSObject {
         for case let doc as MarkdownDocument in NSDocumentController.shared.documents {
             doc.flushAutosave()
         }
-        // 经典 Relauncher 模式：spawn 独立 shell（不受本进程退出影响），延时 open 新 app
+        // 经典 Relauncher 模式：spawn 独立进程（不受本进程退出影响），延时 open 新 app
         // （NSWorkspace.openApplication + terminate 组合在替换场景下启动竞态，实测新进程不起）
+        // shell 脚本体是常量、路径走位置参数 "$1" —— 保持 sleep→open 时序且无引号注入面
         let appPath = Bundle.main.bundleURL.path
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // sleep 2：旧进程退出与 LaunchServices 清理需要余量，1s 实测不够（新实例不起）
-        p.arguments = ["-c", "sleep 2; open -a '" + appPath + "'"]
+        p.arguments = ["-c", "sleep 2; exec /usr/bin/open -a \"$1\"", "blockmark-relauncher", appPath]
         try? p.run()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
     }

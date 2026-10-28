@@ -129,17 +129,9 @@ final class EditorWindowController: NSWindowController {
     // MARK: - 桥：JS → 原生（同步 prompt 拦截）
 
     fileprivate func handleSyncBridge(_ name: String, _ data: [String: Any]) -> String {
-        switch name {
-        case "path.absolutePath":
-            // 文档相对路径 → 绝对路径（图片等资源）
-            if let rel = data["path"] as? String, let base = mdDocument?.fileURL?.deletingLastPathComponent() {
-                let abs = URL(fileURLWithPath: rel, relativeTo: base).absoluteURL.path
-                return encodeSyncResult(["path": "file://" + abs])
-            }
-            return encodeSyncResult(nil)
-        default:
-            return encodeSyncResult(nil)
-        }
+        // 同步桥通道保留（prompt 拦截机制常驻）；暂无在用契约——相对路径解析已内联在
+        // saveImageAs/openUserLink（Swift 侧直解，不再经 JS 往返）
+        return encodeSyncResult(nil)
     }
 
     // MARK: - 图片粘贴（占位符 → 原生落盘 assets/ → 回推替换）
@@ -344,7 +336,7 @@ final class EditorWindowController: NSWindowController {
         }
         let name = url.lastPathComponent
         writePanel(defaultName: name) { target in
-            try? data.write(to: target)
+            do { try data.write(to: target) } catch { self.toast("存储失败：\(error.localizedDescription)") }
         }
     }
 
@@ -591,7 +583,9 @@ final class EditorWindowController: NSWindowController {
                 let name = (self.mdDocument?.displayName ?? "未标记") + ".html"
                 let inlined = Self.inlineExportCss(html)
                 self.writePanel(defaultName: name) { url in
-                    try? inlined.data(using: .utf8)?.write(to: url)
+                    if let d = inlined.data(using: .utf8) {
+                        do { try d.write(to: url) } catch { self.toast("导出失败：\(error.localizedDescription)") }
+                    } else { self.toast("导出失败：内容编码错误") }
                 }
             }
         }
@@ -626,7 +620,7 @@ final class EditorWindowController: NSWindowController {
                     case .success(let data):
                         let name = (self.mdDocument?.displayName ?? "未标记") + ".pdf"
                         self.writePanel(defaultName: name) { url in
-                            try? data.write(to: url)
+                            do { try data.write(to: url) } catch { self.toast("导出失败：\(error.localizedDescription)") }
                         }
                     case .failure(let err):
                         NSLog("[BlockMark] PDF export failed: %@", String(describing: err))

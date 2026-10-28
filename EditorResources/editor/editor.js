@@ -267,6 +267,14 @@ function enterEdit(cid, atEnd = true) {
   placeCaret(el, atEnd);
   updateMarksActive();
   syncFocusHighlight();
+  refreshFindIfOpen();
+}
+
+// findbar 开启期间任何块重渲染都会让 mark 脱钩（计数/跳转失真）——重跑当前查询
+function refreshFindIfOpen() {
+  const bar = document.getElementById("bm-findbar");
+  const input = bar && bar.querySelector("input");
+  if (bar && bar.classList.contains("show") && input) runFind(input.value);
 }
 
 // 代码块/公式块：CodeMirror 内嵌编辑（kind=code 带语言输入框；kind=math 用 stex 模式）
@@ -288,7 +296,7 @@ function mountCmBlock(b, kind) {
     extraKeys: { "Esc": () => commitEditing() },
   });
   const langInput = el.querySelector(".bm-lang-input");
-  editingCm = { cid: b.cid, cm, langInput, kind };
+  editingCm = { cid: b.cid, cm, langInput, kind, baseline: b.source, baselineLang: lang };
   // blur 延迟提交须校验身份：定时器跨块存活时 editingCm 可能已换人（前一个 CM 的陈旧回调不得提交新 CM）
   cm.on("blur", () => setTimeout(() => {
     if (editingCm && editingCm.cm === cm && document.activeElement !== editingCm.langInput) commitEditing();
@@ -303,13 +311,20 @@ function commitEditing() {
   if (cellEditing) commitCellEdit();   // 单元格先落盘（其 rerender 可能重建整块 DOM）
   // CodeMirror 分支
   if (editingCm) {
-    const { cid, cm, langInput, kind } = editingCm;
+    const { cid, cm, langInput, kind, baseline, baselineLang } = editingCm;
     const b = findBlock(cid);
     editingCm = null;
     const el = write().querySelector(`[data-cid="${cid}"]`);
     if (b && el) {
       const body = cm.getValue().replace(/\s+$/, "");
       const lang = kind === "math" ? "" : (langInput.value || "").trim();
+      const composed = kind === "math" ? "$$\n" + body + "\n$$"
+        : "```" + lang + (body ? "\n" + body : "") + "\n```";
+      // 无变更短路：不进 undo 栈、不误标文档已编辑（旧实现 Esc 必 push 一次同值快照）
+      if (composed === baseline && lang === baselineLang) {
+        rerenderBlock(b);
+        return;
+      }
       pushHistory(true);
       if (body.trim() === "" && !lang) {
         if (blocks.length > 1) blocks = blocks.filter(x => x.cid !== cid);
@@ -347,7 +362,7 @@ function commitEditing() {
     return;
   }
   if (newSource === b.source) {
-    reclassify(b);   // 字面未变但活体类型可能与旧 source 分叉（对齐后重渲）
+    reclassify(b, blocks[0] === b);   // 字面未变但活体类型可能与旧 source 分叉（对齐后重渲）
     editingCid = null;
     rerenderBlock(b);
     return;
@@ -355,7 +370,7 @@ function commitEditing() {
   pushHistory(true); // 冻结为上次提交态（旧 source+旧类型）：undo = 回滚整个编辑会话
   editingCid = null;
   b.source = newSource;
-  reclassify(b);
+  reclassify(b, blocks[0] === b);
   rerenderBlock(b);
   notifyChanged();
 }
@@ -488,8 +503,23 @@ function format(cmd) {
   if (!b) return;
   const inline = { bold: "**", italic: "*" };
   if (cmd === "bold" || cmd === "italic") {
-    if (editingCid) wrapSelection(inline[cmd]);
-    else { enterEdit(targetCid, true); setTimeout(() => wrapSelection(inline[cmd]), 30); }
+    if (editingCid) { wrapSelection(inline[cmd]); return; }
+    // 渲染态选区：捕获选中文本，进编辑态后在源码中唯一定位并包裹（旧实现无条件行尾插 ****）
+    const selText = String(getSelection());
+    enterEdit(targetCid, true);
+    setTimeout(() => {
+      const el = write().querySelector(`[data-cid="${targetCid}"]`);
+      if (!el) return;
+      const at = selText ? el.textContent.indexOf(selText) : -1;
+      if (at >= 0 && el.textContent.indexOf(selText, at + 1) === -1) {
+        const d = inline[cmd];
+        el.textContent = el.textContent.slice(0, at) + d + selText + d + el.textContent.slice(at + selText.length);
+        relightEditing();
+        setCaretTextOffset(el, at + d.length + selText.length);
+      } else {
+        wrapSelection(inline[cmd]);   // 无选区/文本不唯一：保守退化为行尾插定界对
+      }
+    }, 30);
     return;
   }
   const heads = ["h1", "h2", "h3", "h4", "h5", "h6"];
@@ -1035,7 +1065,7 @@ function bindEvents() {
       notifyChanged();
       return;
     }
-    if (e.key === "Backspace" && caretAtStart(blockEl) && !e.isComposing) {
+    if (e.key === "Backspace" && caretAtStart(blockEl) && !e.isComposing && getSelection().isCollapsed) {
       const idx = blocks.findIndex(x => x.cid === cid);
       if (blockEl.textContent === "") {
         // 空块删除：唯一块删后必须 renderAll 再进编辑（曾因补块不重渲染 → enterEdit 空指针 → 编辑器假死）
@@ -1061,7 +1091,8 @@ function bindEvents() {
           pushHistory();
           editingCid = null;
           const joinAt = prev.source.length;
-          prev.source += curSrc;
+          // 剥当前块行首语法前缀（# / - / 1. / >）：合块语义=内容并入，前缀不属于内容
+          prev.source += curSrc.replace(/^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/, "");
           reclassify(prev);
           blocks.splice(idx, 1);
           renderAll();
@@ -1078,6 +1109,36 @@ function bindEvents() {
         } else {
           commitEditing();
           enterEdit(prev.cid, true);   // code/math → CM 挂载，光标在末尾
+        }
+        return;
+      }
+    }
+    // Delete 前向合块：光标在块尾且无选区 → 与后块合并（镜像 Backspace 行首合块）
+    if (e.key === "Delete" && caretAtEnd(blockEl) && !e.isComposing && getSelection().isCollapsed) {
+      const idx = blocks.findIndex(x => x.cid === cid);
+      const next = blocks[idx + 1];
+      if (next) {
+        e.preventDefault();
+        const cur = findBlock(cid);
+        const curSrc = blockEl.textContent.replace(/\u00a0/g, " ");
+        if (["paragraph", "heading", "quote", "ul", "ol", "footnote"].includes(next.type)) {
+          pushHistory();
+          editingCid = null;
+          cur.source = curSrc + next.source.replace(/^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/, "");
+          reclassify(cur, blocks[0] === cur);
+          blocks.splice(idx + 1, 1);
+          renderAll();
+          enterEdit(cur.cid);
+          setCaretTextOffset(write().querySelector(`[data-cid="${cur.cid}"]`), curSrc.length);
+          notifyChanged();
+        } else if (next.type === "table") {
+          commitEditing();
+          const blockEl2 = write().querySelector(`[data-cid="${next.cid}"]`);
+          const td0 = blockEl2 && blockEl2.querySelector('[data-r="0"][data-c="0"]');
+          if (td0) enterCellEdit(blockEl2, td0); else enterEdit(next.cid, false);
+        } else {
+          commitEditing();
+          enterEdit(next.cid, false);   // code/math → CM 挂载，光标在开头
         }
         return;
       }
@@ -1220,7 +1281,7 @@ function relightEditing() {
   const src = el.textContent.replace(/\u00a0/g, " ");
   const b = findBlock(editingCid);
   if (b) {
-    const info = classifyBlock(src);
+    const info = classifyBlock(src, blocks[0] === b);   // frontmatter 仅文档首块（守恒）
     b.type = info.type;
     if (info.type === "heading") b.level = info.level; else delete b.level;
     if (info.type === "code") b.lang = info.lang; else delete b.lang;
@@ -1715,7 +1776,7 @@ Bridge.register("menu.onCommand", data => {
       const blockEl = write().querySelector(`[data-cid="${data.cid}"]`);
       const td = blockEl && blockEl.querySelector(
         `td[data-r="${data.tr}"][data-c="${data.tc}"], th[data-r="${data.tr}"][data-c="${data.tc}"]`);
-      if (td) { enterCellEdit(blockEl, td); insertPastedText(td, data.text); return; }
+      if (td) { enterCellEdit(blockEl, td); document.execCommand("insertText", false, data.text); return; }
     }
     const el = editingCid ? write().querySelector(`[data-cid="${editingCid}"]`) : null;
     if (el) { insertPastedText(el, data.text); return; }

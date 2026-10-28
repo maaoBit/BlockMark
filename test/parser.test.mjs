@@ -170,5 +170,27 @@ const jsLink = renderInline("[点我](javascript:alert(1))");
 t("javascript: 钝化为 #", !jsLink.includes("javascript:") && jsLink.includes('href="#"'), jsLink);
 t("data: 同样钝化", !renderInline("![x](data:text/html,hi)").includes("data:"));
 t("https/mailto/相对路径放行", renderInline("[a](https://x.y)").includes("https://x.y") && renderInline("[b](note.md)").includes("note.md"));
+
+console.log("== P2 清尾轮（setext/转义/链接解析/围栏/守恒）");
+t("setext h1", classifyBlock("标题\n===", true).type === "heading" && classifyBlock("标题\n===", true).level === 1);
+t("setext h2", classifyBlock("小节\n---", true).level === 2);
+t("setext 首行列表不触发", classifyBlock("- a\n---", true).type !== "heading");
+t("setext 解析成块", parseBlocks("引言\n\n标题\n===\n")[1].type === "heading");
+const escLink = renderInline("\\[x\\](u)");
+t("转义链接不成立", !escLink.includes("<a"), escLink);
+t("转义星号字面", renderInline("\\*a\\*").includes("*a*") && !renderInline("\\*a\\*").includes("<em>"));
+t("转义尖括号安全", renderInline("\\<b\\>").includes("&lt;b&gt;"));
+const titleLink = renderInline('[t](https://a.b "Tom & Jerry")');
+t("链接 title 含 &", titleLink.includes('title="Tom &amp; Jerry"'), titleLink);
+const parenUrl = renderInline("[x](https://en.wikipedia.org/wiki/Foo_(bar))");
+t("URL 平衡括号", parenUrl.includes("Foo_(bar)") && !parenUrl.includes("</a>)"), parenUrl);
+const fenceInfo = parseBlocks("```\ninner:\n```js\nx\n```\n");
+t("带 info 的围栏行是内容", fenceInfo.length === 1 && fenceInfo[0].type === "code" && fenceInfo[0].source.includes("```js"), JSON.stringify(fenceInfo.map(b=>b.type)));
+t("hr 优先于列表聚合", parseBlocks("- - -\n- b\n").length === 2 && parseBlocks("- - -\n- b\n")[0].type === "hr" && parseBlocks("- - -\n- b\n")[1].type === "ul");
+t("frontmatter 仅首块", classifyBlock("---\ntitle: x\n---", true).type === "frontmatter" && classifyBlock("---\ntitle: x\n---", false).type !== "frontmatter");
+const midFm = parseBlocks("正文\n\n---\ntitle: x\n---\n");
+t("中部 frontmatter 不守恒修复", midFm.every(b => b.type !== "frontmatter") && serializeBlocks(midFm) === serializeBlocks(parseBlocks(serializeBlocks(midFm))), JSON.stringify(midFm.map(b => b.type)));
+t("文档首 frontmatter 仍识别", parseBlocks("---\ntitle: x\n---\n\n正文\n")[0].type === "frontmatter");
+
 console.log(`\n结果: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

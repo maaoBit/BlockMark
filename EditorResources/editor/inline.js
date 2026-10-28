@@ -14,6 +14,12 @@ export function renderInline(md) {
     codes.push(c);
     return `\u0000${codes.length - 1}\u0000`;
   });
+  // 1.1 反斜杠转义：\X（ASCII 标点）→ 字面 X，不参与任何行内语法（GFM 转义语义）
+  const escs = [];
+  s = s.replace(/\\([!"#$%&'()*+,./:;<=>?@[\\\]^_`{|}~-])/g, (_, ch) => {
+    escs.push(ch);
+    return `\u0001${escs.length - 1}\u0001`;
+  });
   s = escapeHtml(s);
   // 1.5 行内公式 $...$（两侧贴字、内部无 $；在 strong/em 前处理防止吞掉 TeX 里的 *）
   s = s.replace(/(^|[^\\$])\$([^\s$]|[^\s$][^$\n]*[^\s$])\$(?!\d)/g, (_, pre, tex) =>
@@ -23,12 +29,12 @@ export function renderInline(md) {
     `<sup class="bm-fnref" data-fn="${id}">${id}</sup>`);
   // 1.7 URL scheme 白名单：javascript:/data: 等可执行 scheme 一律钝化为 #（防注入软防线）
   const safeUrl = u => /^[a-z][a-z0-9+.-]*:/i.test(u) && !/^(https?|mailto|file):/i.test(u) ? "#" : u;
-  // 2. 图片（在链接前处理）
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g,
+  // 2. 图片（在链接前处理）；URL 允许一层平衡括号（wiki 风格 (bar)），title 懒匹配到闭合引号（可含 & 等）
+  s = s.replace(/!\[([^\]]*)\]\(((?:\([^)\s]*\)|[^)\s])+)(?:\s+&quot;((?:(?!&quot;)[^\n])*?)&quot;)?\)/g,
     (_, alt, src, title) =>
       `<img src="${safeUrl(src)}" alt="${alt}"${title ? ` title="${title}"` : ""} loading="lazy">`);
   // 3. 链接
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g,
+  s = s.replace(/\[([^\]]+)\]\(((?:\([^)\s]*\)|[^)\s])+)(?:\s+&quot;((?:(?!&quot;)[^\n])*?)&quot;)?\)/g,
     (_, text, href, title) =>
       `<a href="${safeUrl(href)}"${title ? ` title="${title}"` : ""} target="_blank" rel="noopener">${text}</a>`);
   // 4. 粗体（**x** / __x__；内容允许单 * —— 嵌套强调 **a *b* c** 的外层不能被 [^*] 拦死）
@@ -37,8 +43,9 @@ export function renderInline(md) {
   // 5. 斜体（*x* 或 _x_，避开词中下划线的粗判；在 strong 之后处理内层）
   s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,!?，。！？])|(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?，。！？])/g,
     "$1$3<em>$2$4</em>");
-  // 6. 还原行内代码
+  // 6. 还原行内代码 / 反斜杠转义
   s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${escapeHtml(codes[+i])}</code>`);
+  s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => escapeHtml(escs[+i]));
   // 占位符本身若被转义遗漏，兜底清掉
   return s;
 }

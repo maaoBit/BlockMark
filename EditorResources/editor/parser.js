@@ -15,17 +15,25 @@ const TASK_ITEM = /^(\s*)[-*+]\s+\[( |x|X)\]\s+(.*)$/;
 const FOOTNOTE_DEF = /^\[\^[^\]\n]+\]:\s?.*$/;
 const MATH_DELIM = /^\$\$\s*$/;
 
-export function classifyBlock(source) {
+export function classifyBlock(source, atDocStart = false) {
   if (!source.trim()) return { type: "paragraph" };   // 空/纯空白：quote 的 every(空行) 分支会误吞
   const lines = source.split("\n");
   const first = lines[0];
   const h = first.match(HEADING);
   if (h && lines.length === 1) return { type: "heading", level: h[1].length };
+  // setext 标题：单行文本 + =/- 下划线行（首行须是普通文本，排除与 hr/列表/围栏的歧义）
+  if (lines.length === 2 && !FENCE.test(first) && !HR.test(first) && !UL_ITEM.test(first) &&
+      !OL_ITEM.test(first) && !QUOTE.test(first) && !TABLE_ROW.test(first)) {
+    if (/^=+\s*$/.test(lines[1])) return { type: "heading", level: 1 };
+    if (/^-+\s*$/.test(lines[1])) return { type: "heading", level: 2 };
+  }
   if (HR.test(first) && lines.length === 1) return { type: "hr" };
-  if (FENCE.test(first) && lines[lines.length - 1].trim().startsWith("```") && lines.length >= 2)
+  // 关闭围栏不得带 info string（GFM）：```js 行是内容不是关闭线
+  const closesFence = (l) => /^`{3,}\s*$/.test(l);
+  if (FENCE.test(first) && closesFence(lines[lines.length - 1]) && lines.length >= 2)
     return { type: "code", lang: first.match(FENCE)[1] || "" };
-  // front matter：首行 --- 收尾 ---（在 parseBlocks 中仅文档开头捕获）
-  if (/^---\s*$/.test(first) && lines.length >= 2 && /^(-{3}|\.{3})\s*$/.test(lines[lines.length - 1]))
+  // front matter：仅文档首块（中部的 --- 块活体判 frontmatter 会在保存重开时变 hr+段落，不守恒）
+  if (atDocStart && /^---\s*$/.test(first) && lines.length >= 2 && /^(-{3}|\.{3})\s*$/.test(lines[lines.length - 1]))
     return { type: "frontmatter" };
   // 公式块：$$ 独占开收尾，或首行 $$ 内容 + 末行 $$ 收
   if (MATH_DELIM.test(first) && MATH_DELIM.test(lines[lines.length - 1]) && lines.length >= 2)
@@ -50,9 +58,9 @@ export function parseBlocks(md) {
   const blocks = [];
   const lines = (md || "").replace(/\r\n?/g, "\n").split("\n");
   let i = 0, cid = 1;
-  const push = (source) => {
+  const push = (source, atStart = false) => {
     if (source.trim() === "") return;
-    blocks.push({ cid: "b" + cid++, source, ...classifyBlock(source) });
+    blocks.push({ cid: "b" + cid++, source, ...classifyBlock(source, atStart) });
   };
   while (i < lines.length) {
     const line = lines[i];
@@ -62,7 +70,7 @@ export function parseBlocks(md) {
       let j = 1;
       while (j < lines.length && !/^(-{3}|\.{3})\s*$/.test(lines[j])) j++;
       if (j < lines.length) {
-        push(lines.slice(0, j + 1).join("\n"));
+        push(lines.slice(0, j + 1).join("\n"), true);   // 文档首块（frontmatter 位置语义）
         i = j + 1;
         continue;
       }
@@ -85,12 +93,12 @@ export function parseBlocks(md) {
       push(lines.slice(start, i).join("\n"));
       continue;
     }
-    // 围栏代码块：独占扫描
+    // 围栏代码块：独占扫描（关闭线须裸 ```——带 info 的是内容行）
     const fence = line.match(FENCE);
     if (fence) {
       const start = i;
       i++;
-      while (i < lines.length && !lines[i].trim().startsWith("```")) i++;
+      while (i < lines.length && !/^`{3,}\s*$/.test(lines[i])) i++;
       i = Math.min(i + 1, lines.length);
       push(lines.slice(start, i).join("\n"));
       continue;
@@ -103,6 +111,8 @@ export function parseBlocks(md) {
       push(lines.slice(start, i).join("\n"));
       continue;
     }
+    // 标题 / 分隔线：单行成块（先于列表聚合——"- - -\n- b" 首行是 hr 而非列表项）
+    if (HEADING.test(line) || HR.test(line)) { push(line); i++; continue; }
     // 引用 / 列表：聚合同类连续行
     if (QUOTE.test(line)) {
       const start = i;
@@ -118,8 +128,6 @@ export function parseBlocks(md) {
       push(lines.slice(start, i).join("\n"));
       continue;
     }
-    // 标题 / 分隔线：单行成块
-    if (HEADING.test(line) || HR.test(line)) { push(line); i++; continue; }
     // 段落：到空行为止
     const start = i;
     while (i < lines.length && lines[i].trim() !== "") i++;
@@ -148,8 +156,8 @@ export function serializeBlocks(blocks) {
 }
 
 // 编辑中重分类：用户把段落改成了 "# 标题" 等场景
-export function reclassify(block) {
-  const info = classifyBlock(block.source);
+export function reclassify(block, atDocStart = false) {
+  const info = classifyBlock(block.source, atDocStart);
   block.type = info.type;
   if (info.type === "heading") block.level = info.level; else delete block.level;
   if (info.type === "code") block.lang = info.lang; else delete block.lang;
