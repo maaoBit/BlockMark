@@ -884,10 +884,24 @@ function openTableZoom(cid) {
   initZoomColResize(ov);
 }
 
-// 大视图列宽拖拽（Excel 式）：拖边界 = 相邻两列按百分比此消彼长，总宽恒 100%（零横滚保证不破）。
-// 首次拖拽才从 auto 布局固化为百分比（table-layout:fixed）；每列下限 4% 防压死；双击/按钮重置回 auto。
+// 大视图列宽拖拽（Excel 式）：拖边界 = 相邻两列像素此消彼长，总宽恒定（零横滚保证不破）。
+// 事件模型：move/up 挂 window（手柄随重排会移出光标下方，绑手柄自身会丢事件流→
+// 拖动卡顿、up 丢失监听残留、二次拖拽失效）；按下只登记状态，全局单份监听分发。
+// 首次拖拽才把 auto 布局固化为像素基线（table-layout:fixed）；每列下限 4% 防压死；
+// 双击手柄/顶栏按钮重置回 auto。
 const ZOOM_COL_MIN_PCT = 4;
 let zoomColReset = null;
+let zoomColDrag = null;
+let zoomDragWired = false;
+
+function ensureZoomDragListeners() {
+  if (zoomDragWired) return;
+  zoomDragWired = true;
+  window.addEventListener("pointermove", ev => { if (zoomColDrag) zoomColDrag.move(ev); });
+  const end = () => { if (zoomColDrag) zoomColDrag.end(); zoomColDrag = null; };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+}
 
 function initZoomColResize(ov) {
   const table = ov.querySelector(".bm-table-zoom-scroll table");
@@ -896,10 +910,10 @@ function initZoomColResize(ov) {
   zoomColReset = null;
   if (!table || ths.length < 2) { if (resetBtn) resetBtn.style.display = "none"; return; }
   if (resetBtn) resetBtn.style.display = "";
-  let pcts = null;   // null = 自动布局
+  let pinned = null;   // null = 自动布局；固化后为像素宽数组
 
   const reset = () => {
-    pcts = null;
+    pinned = null;
     table.style.tableLayout = "";
     for (const th of ths) th.style.width = "";
   };
@@ -908,6 +922,7 @@ function initZoomColResize(ov) {
     resetBtn.dataset.wired = "1";
     resetBtn.addEventListener("click", () => zoomColReset && zoomColReset());
   }
+  ensureZoomDragListeners();
 
   for (let i = 0; i < ths.length - 1; i++) {
     const h = document.createElement("div");
@@ -916,33 +931,24 @@ function initZoomColResize(ov) {
     ths[i].appendChild(h);
     h.addEventListener("pointerdown", e => {
       e.preventDefault();   // 阻止拖拽中选中文本
-      if (!pcts) {
-        // 固化当前 auto 布局的列宽为百分比基线
-        const total = ths.reduce((a, th) => a + th.offsetWidth, 0) || 1;
-        pcts = ths.map(th => (th.offsetWidth / total) * 100);
-      }
-      const startX = e.clientX;
-      const base = [...pcts];
-      const pairSum = base[i] + base[i + 1];
+      if (zoomColDrag) return;   // 拖拽进行中忽略二次按下
+      if (!pinned) pinned = ths.map(th => th.offsetWidth);   // auto 布局固化为像素基线
+      const base = [...pinned];
       const totalW = table.offsetWidth || 1;
-      try { h.setPointerCapture(e.pointerId); } catch (_) { /* 合成事件无活动指针 */ }
-      const move = ev => {
-        const d = ((ev.clientX - startX) / totalW) * 100;
-        // 下限钳制内保持 pair 守恒：moved 落在 [MIN, pairSum-MIN]
-        const moved = Math.min(Math.max(base[i] + d, ZOOM_COL_MIN_PCT), pairSum - ZOOM_COL_MIN_PCT);
-        pcts[i] = moved;
-        pcts[i + 1] = pairSum - moved;
-        table.style.tableLayout = "fixed";
-        ths.forEach((th, k) => { th.style.width = pcts[k] + "%"; });
+      const minW = Math.max(16, Math.round(totalW * ZOOM_COL_MIN_PCT / 100));
+      const pairSum = base[i] + base[i + 1];
+      const card = ov.querySelector(".bm-table-zoom-card");
+      card.classList.add("bm-zoom-dragging");
+      zoomColDrag = {
+        move: ev => {
+          const moved = Math.min(Math.max(base[i] + (ev.clientX - e.clientX), minW), pairSum - minW);
+          pinned[i] = moved;
+          pinned[i + 1] = pairSum - moved;
+          table.style.tableLayout = "fixed";
+          ths.forEach((th, k) => { th.style.width = pinned[k] + "px"; });   // 像素直写：无百分比取整颗粒
+        },
+        end: () => card.classList.remove("bm-zoom-dragging"),
       };
-      const up = () => {
-        h.removeEventListener("pointermove", move);
-        h.removeEventListener("pointerup", up);
-        h.removeEventListener("pointercancel", up);
-      };
-      h.addEventListener("pointermove", move);
-      h.addEventListener("pointerup", up);
-      h.addEventListener("pointercancel", up);
     });
     h.addEventListener("dblclick", () => zoomColReset && zoomColReset());
   }

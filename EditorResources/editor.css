@@ -477,3 +477,6 @@ td.bm-cell-editing, th.bm-cell-editing {
   left: 3.5px;
 }
 .bm-table-zoom-bar .bm-zoom-reset { white-space: nowrap; }
+
+/* 拖拽进行中：禁选择，光标全局列宽调节 */
+.bm-zoom-dragging, .bm-zoom-dragging * { user-select: none; cursor: col-resize; }

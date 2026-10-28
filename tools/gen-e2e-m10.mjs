@@ -52,7 +52,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(20);
 
-    // 7) 列宽拖拽：手柄拖动 → 相邻列百分比此消彼长、总宽恒 100%、零横滚保持
+    // 7) 列宽拖拽：多步 move 流（复现"手柄移出光标下丢事件"故障面）、像素直写、
+    //    pair 守恒、二次拖拽可用、双击重置
     Editor.open("| 短列 | 长文本列 |\\n|---|---|\\n| a | 这列文字比较长用来占位 |\\n");
     const rcid = document.querySelector('[data-type="table"]').dataset.cid;
     block(rcid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
@@ -65,20 +66,40 @@ window.addEventListener("DOMContentLoaded", async () => {
     r.handleExists = !!handle;
     if (handle) {
       const w0 = tbl3.offsetWidth;
+      const th0 = ths3.map(t => t.offsetWidth);
       const x0 = ths3[0].getBoundingClientRect().right;
-      handle.dispatchEvent(new PointerEvent("pointerdown", { clientX: x0, pointerId: 7, bubbles: true }));
-      handle.dispatchEvent(new PointerEvent("pointermove", { clientX: x0 + 300, pointerId: 7, bubbles: true }));
-      handle.dispatchEvent(new PointerEvent("pointerup", { pointerId: 7, bubbles: true }));
+      const dragBy = dx => {
+        handle.dispatchEvent(new PointerEvent("pointerdown", { clientX: x0, pointerId: 7, bubbles: true }));
+        for (const step of [10, 25, 40, 60]) {
+          window.dispatchEvent(new PointerEvent("pointermove", { clientX: x0 + step, pointerId: 7, bubbles: true }));
+        }
+        window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 7, bubbles: true }));
+      };
+      dragBy(0);
       await sleep(20);
-      const pcts = ths3.map(th => parseFloat(th.style.width));
-      r.dragSetWidths = pcts.length === 2 && ths3.every(th => th.style.width.endsWith("%"));
-      r.dragConserved = pcts.length === 2 && Math.abs(pcts[0] + pcts[1] - 100) < 0.6;
-      r.dragFirstGrew = pcts.length === 2 && pcts[0] > 80;   // 拖右 300px → 首列逼近上限（钳 96%）
+      const th1 = ths3.map(t => t.offsetWidth);
+      r.dragPxWidths = ths3.every(t => t.style.width.endsWith("px"));
+      r.dragConserved = Math.abs(th1[0] + th1[1] - (th0[0] + th0[1])) <= 1;
+      r.dragFirstGrew = th1[0] > th0[0] + 30;
       r.dragNoHScroll = sc3.scrollWidth <= sc3.clientWidth + 1 && Math.abs(tbl3.offsetWidth - w0) <= 1;
+      // 二次拖拽（回归：旧版监听残留导致失效）——往回拖
+      const x1 = ths3[0].getBoundingClientRect().right;
+      handle.dispatchEvent(new PointerEvent("pointerdown", { clientX: x1, pointerId: 8, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: x1 - 80, pointerId: 8, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 8, bubbles: true }));
+      await sleep(20);
+      const th2 = ths3.map(t => t.offsetWidth);
+      r.secondDragWorks = th2[0] < th1[0] - 30 && Math.abs(th2[0] + th2[1] - (th0[0] + th0[1])) <= 1;
+      // 拖拽中文本跟随重排：move 后（未 up 前）列宽即时生效
+      handle.dispatchEvent(new PointerEvent("pointerdown", { clientX: ths3[0].getBoundingClientRect().right, pointerId: 9, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: ths3[0].getBoundingClientRect().right + 50, pointerId: 9, bubbles: true }));
+      const midDrag = ths3[0].offsetWidth;
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, bubbles: true }));
+      r.liveReflow = midDrag > th2[0] + 20;
       // 双击重置回 auto
       handle.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
       await sleep(20);
-      r.dblclickReset = ths3.every(th => th.style.width === "") && tbl3.style.tableLayout === "";
+      r.dblclickReset = ths3.every(t => t.style.width === "") && tbl3.style.tableLayout === "";
     }
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(20);
