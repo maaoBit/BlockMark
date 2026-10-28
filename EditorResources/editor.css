@@ -448,3 +448,32 @@ td.bm-cell-editing, th.bm-cell-editing {
   vertical-align: top;
 }
 .bm-table-zoom-scroll th { background: var(--code-bg); position: sticky; top: 0; z-index: 1; }
+
+/* 列宽拖拽手柄（大视图）：相邻列百分比此消彼长，总宽恒定 */
+.bm-zoom-colhandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 2;
+  user-select: none;
+  touch-action: none;
+}
+.bm-zoom-colhandle::after {
+  content: "";
+  position: absolute;
+  top: 15%;
+  bottom: 15%;
+  left: 4px;
+  width: 1px;
+  background: var(--fg-faint);
+}
+.bm-zoom-colhandle:hover::after,
+.bm-zoom-colhandle:active::after {
+  background: var(--accent);
+  width: 2px;
+  left: 3.5px;
+}
+.bm-table-zoom-bar .bm-zoom-reset { white-space: nowrap; }

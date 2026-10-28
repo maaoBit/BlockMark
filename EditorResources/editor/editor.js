@@ -857,7 +857,8 @@ function openTableZoom(cid) {
     ov.id = "bm-table-zoom";
     ov.innerHTML = `<div class="bm-table-zoom-card">` +
       `<div class="bm-table-zoom-bar"><span class="bm-table-zoom-title"></span>` +
-      `<span>只读预览 · Esc 关闭</span><button type="button" title="关闭">\u2715</button></div>` +
+      `<span>只读预览 · Esc 关闭</span><button type="button" class="bm-zoom-reset" title="恢复自动列宽">重置列宽</button>` +
+      `<button type="button" title="关闭">\u2715</button></div>` +
       `<div class="bm-table-zoom-scroll"></div></div>`;
     document.body.appendChild(ov);
     ov.addEventListener("mousedown", e => { if (e.target === ov) closeTableZoom(); });   // 点背景关
@@ -874,7 +875,77 @@ function openTableZoom(cid) {
   const scroll = ov.querySelector(".bm-table-zoom-scroll");
   scroll.innerHTML = renderTable(b.source);
   for (const cell of scroll.querySelectorAll("td, th")) cell.removeAttribute("contenteditable");   // 只读
-  ov.classList.add("show");
+  ov.classList.add("show");   // 先显示再量宽（display:none 时 offsetWidth 恒 0）
+  // 卡片宽度按 auto 表宽钉死（上限 94vw）：列宽拖拽的百分比基准自此稳定，
+  // 切 fixed 布局后总宽不随内容涨缩（否则收缩到内容宽的卡片会被百分比反推着膨胀）
+  const card = ov.querySelector(".bm-table-zoom-card");
+  const autoW = (scroll.querySelector("table")?.offsetWidth || 0) + 40;
+  card.style.width = Math.min(autoW, Math.round(window.innerWidth * 0.94)) + "px";
+  initZoomColResize(ov);
+}
+
+// 大视图列宽拖拽（Excel 式）：拖边界 = 相邻两列按百分比此消彼长，总宽恒 100%（零横滚保证不破）。
+// 首次拖拽才从 auto 布局固化为百分比（table-layout:fixed）；每列下限 4% 防压死；双击/按钮重置回 auto。
+const ZOOM_COL_MIN_PCT = 4;
+let zoomColReset = null;
+
+function initZoomColResize(ov) {
+  const table = ov.querySelector(".bm-table-zoom-scroll table");
+  const ths = table ? [...table.querySelectorAll("thead th")] : [];
+  const resetBtn = ov.querySelector(".bm-zoom-reset");
+  zoomColReset = null;
+  if (!table || ths.length < 2) { if (resetBtn) resetBtn.style.display = "none"; return; }
+  if (resetBtn) resetBtn.style.display = "";
+  let pcts = null;   // null = 自动布局
+
+  const reset = () => {
+    pcts = null;
+    table.style.tableLayout = "";
+    for (const th of ths) th.style.width = "";
+  };
+  zoomColReset = reset;
+  if (resetBtn && !resetBtn.dataset.wired) {
+    resetBtn.dataset.wired = "1";
+    resetBtn.addEventListener("click", () => zoomColReset && zoomColReset());
+  }
+
+  for (let i = 0; i < ths.length - 1; i++) {
+    const h = document.createElement("div");
+    h.className = "bm-zoom-colhandle";
+    h.title = "拖动调整列宽（双击重置）";
+    ths[i].appendChild(h);
+    h.addEventListener("pointerdown", e => {
+      e.preventDefault();   // 阻止拖拽中选中文本
+      if (!pcts) {
+        // 固化当前 auto 布局的列宽为百分比基线
+        const total = ths.reduce((a, th) => a + th.offsetWidth, 0) || 1;
+        pcts = ths.map(th => (th.offsetWidth / total) * 100);
+      }
+      const startX = e.clientX;
+      const base = [...pcts];
+      const pairSum = base[i] + base[i + 1];
+      const totalW = table.offsetWidth || 1;
+      try { h.setPointerCapture(e.pointerId); } catch (_) { /* 合成事件无活动指针 */ }
+      const move = ev => {
+        const d = ((ev.clientX - startX) / totalW) * 100;
+        // 下限钳制内保持 pair 守恒：moved 落在 [MIN, pairSum-MIN]
+        const moved = Math.min(Math.max(base[i] + d, ZOOM_COL_MIN_PCT), pairSum - ZOOM_COL_MIN_PCT);
+        pcts[i] = moved;
+        pcts[i + 1] = pairSum - moved;
+        table.style.tableLayout = "fixed";
+        ths.forEach((th, k) => { th.style.width = pcts[k] + "%"; });
+      };
+      const up = () => {
+        h.removeEventListener("pointermove", move);
+        h.removeEventListener("pointerup", up);
+        h.removeEventListener("pointercancel", up);
+      };
+      h.addEventListener("pointermove", move);
+      h.addEventListener("pointerup", up);
+      h.addEventListener("pointercancel", up);
+    });
+    h.addEventListener("dblclick", () => zoomColReset && zoomColReset());
+  }
 }
 
 function closeTableZoom() {

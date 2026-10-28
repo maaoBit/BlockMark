@@ -52,7 +52,38 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(20);
 
-    // 7) 右键菜单含"放大查看表格"；命令直发可开
+    // 7) 列宽拖拽：手柄拖动 → 相邻列百分比此消彼长、总宽恒 100%、零横滚保持
+    Editor.open("| 短列 | 长文本列 |\\n|---|---|\\n| a | 这列文字比较长用来占位 |\\n");
+    const rcid = document.querySelector('[data-type="table"]').dataset.cid;
+    block(rcid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await sleep(30);
+    const ov3 = document.getElementById("bm-table-zoom");
+    const sc3 = ov3.querySelector(".bm-table-zoom-scroll");
+    const tbl3 = sc3.querySelector("table");
+    const ths3 = [...tbl3.querySelectorAll("thead th")];
+    const handle = ths3[0].querySelector(".bm-zoom-colhandle");
+    r.handleExists = !!handle;
+    if (handle) {
+      const w0 = tbl3.offsetWidth;
+      const x0 = ths3[0].getBoundingClientRect().right;
+      handle.dispatchEvent(new PointerEvent("pointerdown", { clientX: x0, pointerId: 7, bubbles: true }));
+      handle.dispatchEvent(new PointerEvent("pointermove", { clientX: x0 + 300, pointerId: 7, bubbles: true }));
+      handle.dispatchEvent(new PointerEvent("pointerup", { pointerId: 7, bubbles: true }));
+      await sleep(20);
+      const pcts = ths3.map(th => parseFloat(th.style.width));
+      r.dragSetWidths = pcts.length === 2 && ths3.every(th => th.style.width.endsWith("%"));
+      r.dragConserved = pcts.length === 2 && Math.abs(pcts[0] + pcts[1] - 100) < 0.6;
+      r.dragFirstGrew = pcts.length === 2 && pcts[0] > 80;   // 拖右 300px → 首列逼近上限（钳 96%）
+      r.dragNoHScroll = sc3.scrollWidth <= sc3.clientWidth + 1 && Math.abs(tbl3.offsetWidth - w0) <= 1;
+      // 双击重置回 auto
+      handle.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await sleep(20);
+      r.dblclickReset = ths3.every(th => th.style.width === "") && tbl3.style.tableLayout === "";
+    }
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await sleep(20);
+
+    // 8) 右键菜单含"放大查看表格"；命令直发可开
     const orig = Bridge.call.bind(Bridge);
     let cap = null;
     Bridge.call = (n, d) => { if (n === "menu.showContext") cap = d; else orig(n, d); };
