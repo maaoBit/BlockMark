@@ -102,6 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recentMenu.submenu = recentSubMenu
         fileSubMenu.addItem(recentMenu)
         fileSubMenu.addItem(.separator())
+        fileSubMenu.addItem(withTitle: "关闭", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileSubMenu.addItem(.separator())
         fileSubMenu.addItem(withTitle: "存储", action: #selector(NSDocument.save(_:)), keyEquivalent: "s")
         fileSubMenu.addItem(withTitle: "另存为…", action: #selector(NSDocument.saveAs(_:)), keyEquivalent: "S")
         fileSubMenu.addItem(.separator())

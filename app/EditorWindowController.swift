@@ -326,6 +326,57 @@ final class EditorWindowController: NSWindowController {
         }
     }
 
+    // MARK: - 关闭审查（未保存文档关窗必须过审：存储…/取消/不存储；Typora/TextEdit 惯例）
+    // 程序化窗口链路上 AppKit 默认的 canCloseDocument 审查不生效（实证：edited 未命名文档点红叉直接关窗丢内容）
+    // —— 这里显式接管：先拉最新内容+冲刷文件型自动保存，仍有未保存变更才弹表单。
+
+    private var closeFlowDone = false   // completeClose 内 window.close() 的放行标志（防审查重入）
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let doc = mdDocument, !closeFlowDone else { return true }
+        pullLatestMarkdown { [weak self] in
+            guard let self, let win = self.window else { return }
+            doc.flushAutosave()   // 文件型：防抖尾巴落盘并清 edited；未命名/写失败 → 保持 edited 过审
+            if !doc.isDocumentEdited { self.completeClose(); return }
+            let alert = NSAlert()
+            alert.messageText = "要把对“\(doc.displayName ?? "未标记")”的更改存储吗？"
+            alert.informativeText = "关闭前存储更改，或选择“不存储”放弃。"
+            alert.addButton(withTitle: "存储…")
+            alert.addButton(withTitle: "取消")
+            alert.addButton(withTitle: "不存储")
+            alert.beginSheetModal(for: win) { [weak self] response in
+                guard let self else { return }
+                if response == .alertFirstButtonReturn { self.saveThenClose() }
+                else if response == .alertThirdButtonReturn { self.completeClose() }
+                // 取消 → 留在编辑器
+            }
+        }
+        return false
+    }
+
+    private func saveThenClose() {
+        guard let doc = mdDocument else { completeClose(); return }
+        let write: (URL) -> Void = { [weak self] url in
+            guard let data = doc.markdown.data(using: .utf8),
+                  (try? data.write(to: url, options: .atomic)) != nil else {
+                self?.toast("写入失败，未关闭")
+                return   // 写失败保持开窗，内容不丢
+            }
+            self?.completeClose()
+        }
+        if let url = doc.fileURL { write(url); return; }
+        writePanel(defaultName: (doc.displayName ?? "未标记") + ".md") { url in write(url) }
+    }
+
+    private func completeClose() {
+        guard let doc = mdDocument, let win = window else { return }
+        closeFlowDone = true
+        doc.updateChangeCount(.changeCleared)   // 防 doc.close() 内部再审
+        win.close()
+        doc.close()   // 从 NSDocumentController 移除（最后一个文档关闭即干净退出，不留无窗僵尸进程）
+        closeFlowDone = false
+    }
+
     // MARK: - 查找 ⌘F（编辑器内 findbar）
 
     @objc func findAction(_ sender: Any?) {
