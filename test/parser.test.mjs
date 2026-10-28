@@ -151,5 +151,24 @@ t("空行表格分类保持", parseBlocks(tableInsertRow(SRC, 1) + "\n")[0].type
 console.log("== 边界");
 t("空文档给单空段落", parseBlocks("").length === 1 && parseBlocks("")[0].type === "paragraph");
 t("CRLF 归一", parseBlocks("a\r\n\r\nb").length === 2);
+
+console.log("== 评审轮回归（嵌套强调/单元格换行/空块分类/scheme）");
+const { classifyBlock } = await import("../EditorResources/editor/parser.js");
+t("classifyBlock 已导出", typeof classifyBlock === "function");
+t("空块分类为段落", classifyBlock("").type === "paragraph" && classifyBlock("  ").type === "paragraph");
+t("纯空白不再误判 quote", classifyBlock("  \n ").type === "paragraph");
+const nest = renderInline("**a *b* c**");
+t("嵌套强调：外层粗体包裹", nest.startsWith("<strong>") && nest.endsWith("</strong>"), nest);
+t("嵌套强调：内层斜体", nest.includes("<strong>a <em>b</em> c</strong>"), nest);
+const nest2 = renderInline("__a _b_ c__");
+t("下划线嵌套强调", nest2.includes("<strong>a <em>b</em> c</strong>"), nest2);
+t("相邻粗体不粘连", renderInline("**a** and **b**").includes("<strong>a</strong>") && renderInline("**a** and **b**").includes("<strong>b</strong>"));
+t("孤立 **** 不匹配", !renderInline("****").includes("<strong>"));
+const cellNl = tableSetCell("| A | B |\n|---|---|\n| 1 | 2 |", 1, 0, "a\nb");
+t("单元格换行归一为空格", tableGetCell(cellNl, 1, 0) === "a b" && tableParse(cellNl).rows.length === 2, cellNl);
+const jsLink = renderInline("[点我](javascript:alert(1))");
+t("javascript: 钝化为 #", !jsLink.includes("javascript:") && jsLink.includes('href="#"'), jsLink);
+t("data: 同样钝化", !renderInline("![x](data:text/html,hi)").includes("data:"));
+t("https/mailto/相对路径放行", renderInline("[a](https://x.y)").includes("https://x.y") && renderInline("[b](note.md)").includes("note.md"));
 console.log(`\n结果: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

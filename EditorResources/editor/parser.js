@@ -15,7 +15,8 @@ const TASK_ITEM = /^(\s*)[-*+]\s+\[( |x|X)\]\s+(.*)$/;
 const FOOTNOTE_DEF = /^\[\^[^\]\n]+\]:\s?.*$/;
 const MATH_DELIM = /^\$\$\s*$/;
 
-function classifyBlock(source) {
+export function classifyBlock(source) {
+  if (!source.trim()) return { type: "paragraph" };   // 空/纯空白：quote 的 every(空行) 分支会误吞
   const lines = source.split("\n");
   const first = lines[0];
   const h = first.match(HEADING);
@@ -199,15 +200,17 @@ export function tableGetCell(source, r, c) {
 
 // 表对象 → 源文本。parse 时已还原 \| → 序列化统一重转义每格
 // （旧实现只转义被写的那格，其余含 \| 的格会在重拼时丢失转义被拆列）
+// 换行归一为空格：GFM 表格单元格不承载换行，混入会解体表格结构
 function tableSerialize(t) {
   const width = Math.max(...t.rows.map(row => row.length));
   const aligns = t.aligns.slice();
   while (aligns.length < width) aligns.push("left");
   if (aligns.length > width) aligns.length = width;
+  const clean = cell => (cell ?? "").replace(/[\r\n]+/g, " ").replace(/\|/g, "\\|");
   const lines = t.rows.map(row => {
     const padded = row.slice();
     while (padded.length < width) padded.push("");
-    return "| " + padded.map(cell => cell.replace(/\|/g, "\\|")).join(" | ") + " |";
+    return "| " + padded.map(clean).join(" | ") + " |";
   });
   const alignLine = "| " + aligns.map(a =>
     a === "center" ? ":---:" : a === "right" ? "---:" : "---").join(" | ") + " |";

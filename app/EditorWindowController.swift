@@ -105,10 +105,7 @@ final class EditorWindowController: NSWindowController {
         case "document.updateChangeCount":
             mdDocument?.markEdited()
         case "path.openURL":
-            if let s = data["url"] as? String, let url = URL(string: s),
-               ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") {
-                NSWorkspace.shared.open(url)
-            }
+            if let s = data["url"] as? String { openUserLink(s) }
         case "images.savePasted":
             handleSavePasted(data)
         case "library.listDocs":
@@ -314,8 +311,33 @@ final class EditorWindowController: NSWindowController {
         }
     }
 
+    /// 链接打开：http(s)/file 直接开；相对路径按文档目录解析——.md 走应用内打开（知识库跳转），其余交系统
+    private func openUserLink(_ s: String) {
+        if let url = URL(string: s), let scheme = url.scheme?.lowercased(),
+           ["http", "https", "file"].contains(scheme) {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        guard !s.isEmpty, let base = mdDocument?.fileURL?.deletingLastPathComponent() else {
+            toast("无法打开链接：\(s)")
+            return
+        }
+        let abs = URL(fileURLWithPath: s, relativeTo: base).absoluteURL
+        if ["md", "markdown", "mdown", "mkd"].contains(abs.pathExtension.lowercased()) {
+            NSDocumentController.shared.openDocument(withContentsOf: abs, display: true) { _, _, _ in }
+        } else {
+            NSWorkspace.shared.open(abs)
+        }
+    }
+
     private func saveImageAs() {
-        guard let url = URL(string: ctxImg), url.isFileURL,
+        // 相对路径（贴图 assets/… 等）按文档目录解析为绝对 file URL；远程/无文档仍提示
+        var imgURL = URL(string: ctxImg)
+        if let u = imgURL, u.scheme == nil, !ctxImg.isEmpty,
+           let base = mdDocument?.fileURL?.deletingLastPathComponent() {
+            imgURL = URL(fileURLWithPath: ctxImg, relativeTo: base).absoluteURL
+        }
+        guard let url = imgURL, url.isFileURL,
               let data = try? Data(contentsOf: url) else {
             toast("无法读取图片（仅支持本地文件）")
             return
@@ -330,12 +352,16 @@ final class EditorWindowController: NSWindowController {
     // 程序化窗口链路上 AppKit 默认的 canCloseDocument 审查不生效（实证：edited 未命名文档点红叉直接关窗丢内容）
     // —— 这里显式接管：先拉最新内容+冲刷文件型自动保存，仍有未保存变更才弹表单。
 
-    private var closeFlowDone = false   // completeClose 内 window.close() 的放行标志（防审查重入）
+    private var closeFlowDone = false       // completeClose 内 window.close() 的放行标志（防审查重入）
+    private var closeReviewInFlight = false // 异步拉取/表单期间的二次红叉防重入（否则双 sheet 双 completeClose）
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard let doc = mdDocument, !closeFlowDone else { return true }
+        guard !closeReviewInFlight else { return false }
+        closeReviewInFlight = true
         pullLatestMarkdown { [weak self] in
             guard let self, let win = self.window else { return }
+            self.closeReviewInFlight = false
             doc.flushAutosave()   // 文件型：防抖尾巴落盘并清 edited；未命名/写失败 → 保持 edited 过审
             if !doc.isDocumentEdited { self.completeClose(); return }
             let alert = NSAlert()

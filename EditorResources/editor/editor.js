@@ -310,7 +310,7 @@ function commitEditing() {
     if (b && el) {
       const body = cm.getValue().replace(/\s+$/, "");
       const lang = kind === "math" ? "" : (langInput.value || "").trim();
-      pushHistory();
+      pushHistory(true);
       if (body.trim() === "" && !lang) {
         if (blocks.length > 1) blocks = blocks.filter(x => x.cid !== cid);
         renderAll();
@@ -331,8 +331,7 @@ function commitEditing() {
   if (!editingCid) return;
   const b = findBlock(editingCid);
   const el = write().querySelector(`[data-cid="${editingCid}"]`);
-  editingCid = null;
-  if (!b || !el) return;
+  if (!b || !el) { editingCid = null; return; }
   // "编辑态 el 的 textContent == 源码" 只在可编辑时成立；若期间块被重渲染成渲染态
   // （如围栏转换 renderAll 后），可见文本不是源码 —— 以 b.source 为准，禁止回写清空
   const newSource = el.isContentEditable ? el.textContent.replace(/\u00a0/g, " ") : b.source;
@@ -340,14 +339,21 @@ function commitEditing() {
   el.classList.remove("bm-editing");
   syncFocusHighlight();
   if (newSource.trim() === "" && blocks.length > 1) {
-    pushHistory();
+    pushHistory(true);   // 冻结为上次提交态：undo 复活被删块的原文
+    editingCid = null;
     blocks = blocks.filter(x => x.cid !== b.cid);
     renderAll();
     notifyChanged();
     return;
   }
-  if (newSource === b.source) { rerenderBlock(b); return; }
-  pushHistory();
+  if (newSource === b.source) {
+    reclassify(b);   // 字面未变但活体类型可能与旧 source 分叉（对齐后重渲）
+    editingCid = null;
+    rerenderBlock(b);
+    return;
+  }
+  pushHistory(true); // 冻结为上次提交态（旧 source+旧类型）：undo = 回滚整个编辑会话
+  editingCid = null;
   b.source = newSource;
   reclassify(b);
   rerenderBlock(b);
@@ -356,9 +362,28 @@ function commitEditing() {
 
 // ---------- 历史栈 ----------
 
-function snapshot() { return JSON.stringify(blocks); }
-function pushHistory() {
-  undoStack.push(snapshot());
+// 快照经 withLiveBlocks 一致化：活体 type 必须配活文本 source，否则 undo 恢复出"渲染 h1/磁盘段落"嵌合态
+function snapshot() { return withLiveBlocks(() => JSON.stringify(blocks)); }
+
+// 冻结快照（提交路径专用）：编辑中块回退为"上次提交态"——旧 source 配按旧 source 重判的类型。
+// undo 语义 = 回滚整个编辑会话（快照若取活文本，Esc 提交后 ⌘Z 会变成空转）
+function snapshotFrozen() {
+  const b0 = editingCid ? findBlock(editingCid) : null;
+  let revert = null;
+  if (b0) {
+    revert = { b: b0, props: { ...b0 } };
+    const info = classifyBlock(b0.source);
+    b0.type = info.type;
+    if (info.type === "heading") b0.level = info.level; else delete b0.level;
+    if (info.type === "code") b0.lang = info.lang; else delete b0.lang;
+    if (info.tasks) b0.tasks = true; else delete b0.tasks;
+  }
+  const s = JSON.stringify(blocks);
+  if (revert) Object.assign(revert.b, revert.props);
+  return s;
+}
+function pushHistory(frozen) {
+  undoStack.push(frozen ? snapshotFrozen() : snapshot());
   if (undoStack.length > 300) undoStack.shift();
   redoStack = [];
 }
@@ -398,7 +423,7 @@ let savedTick = "";
 function updateStatus() {
   const el = document.getElementById("bm-status");
   if (!el) return;
-  const text = liveMarkdown();
+  const text = getMarkdown();
   const cjk = (text.match(/[\u4e00-\u9fff\u3040-\u30ff]/g) || []).length;
   const words = (text.replace(/[\u4e00-\u9fff\u3040-\u30ff]/g, " ").match(/[A-Za-z0-9_'-]+/g) || []).length;
   el.textContent = `${blocks.length} 块 · ${cjk + words} 字 · ${text.split("\n").length} 行${savedTick}`;
@@ -500,10 +525,12 @@ function format(cmd) {
     hr: "---",
   };
   if (inserts[cmd]) {
-    const idx = blocks.findIndex(x => x.cid === targetCid);
+    commitEditing();   // 先落活文本——renderAll 会抹掉编辑态 DOM，未提交即重建=静默丢字
+    const idx0 = blocks.findIndex(x => x.cid === targetCid);
+    const at = idx0 === -1 ? blocks.length - 1 : idx0;   // 目标块可能被提交自删（空块）
     const nb = { cid: newCid(), type: "paragraph", source: inserts[cmd] };
     pushHistory();
-    blocks.splice(idx + 1, 0, nb);
+    blocks.splice(at + 1, 0, nb);
     renderAll();
     if (cmd === "code" || cmd === "math") { /* 点击进入 CM 编辑 */ }
     else enterEdit(nb.cid);
@@ -620,8 +647,9 @@ function focusBlankAreaAt(y) {
 }
 
 function insertParagraphAfterBlock(cid) {
-  const idx = blocks.findIndex(x => x.cid === cid);
-  if (idx === -1) return;
+  commitEditing();   // 先落活文本（renderAll 会抹掉编辑态 DOM；空块此时可能被自删）
+  let idx = blocks.findIndex(x => x.cid === cid);
+  if (idx === -1) idx = blocks.length - 1;   // 目标块被提交自删 → 追加到文末
   const last = blocks[idx];
   if (idx === blocks.length - 1 && last.type === "paragraph" && last.source === "") {
     enterEdit(last.cid, true);
@@ -641,7 +669,7 @@ function runTableCommand(cmd, data) {
   const b = findBlock(cid);
   if (!b || b.type !== "table") return;
   const r = +data.tr, c = +data.tc;
-  if (cellEditing && cellEditing.cid === cid) commitCellEdit();
+  commitEditing();   // 先落所有编辑态活文本（删表 renderAll 会抹掉别处编辑中的 DOM）
   if (cmd === "table.deleteTable") {
     pushHistory();
     blocks = blocks.filter(x => x.cid !== cid);
@@ -788,6 +816,8 @@ function openLightbox(src) {
 
 // ---------- 粘贴核心（URL 智能粘贴：选中文本 + URL → [文本](URL)） ----------
 
+const pasteTargets = new Map();   // 贴图 marker → 目标块 cid（落盘异步往返期防悬死）
+
 function insertPastedText(el, text) {
   const sel = getSelection();
   const selText = (sel.rangeCount && el.contains(sel.anchorNode)) ? String(sel) : "";
@@ -875,7 +905,13 @@ function bindEvents() {
 
   w.addEventListener("keydown", e => {
     if (sourceMode) return;
-    if (e.target.closest && e.target.closest(".bm-cm-host")) return; // CodeMirror 自理
+    if (e.target.closest && e.target.closest(".bm-cm-block")) {
+      if (e.target.closest(".bm-cm-host")) return;   // CodeMirror 自理
+      // 语言输入框：Enter/Esc = 确认提交；其余键浏览器自理。
+      // （旧守卫只排 .bm-cm-host，语言框回车会落进 Enter 拆块分支把代码块当段落摧毁）
+      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); commitEditing(); }
+      return;
+    }
     const blockEl = e.target.closest ? e.target.closest(".bm-block") : e.target.parentElement?.closest(".bm-block");
     if (!blockEl) return;
     const cid = blockEl.dataset.cid;
@@ -895,6 +931,9 @@ function bindEvents() {
     }
 
     if (e.isComposing) return;   // IME 组合中的 Enter/Backspace 交给输入法
+    // Tab：编辑态下阻止默认 —— 渲染态表格格恒为 contenteditable，默认焦点会逃进格内
+    // 造成绕过模型的"幽灵输入"（输入事件不认非编辑态祖先，内容一重渲染即蒸发）
+    if (e.key === "Tab") { e.preventDefault(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
       e.shiftKey ? redo() : undo();
@@ -1080,6 +1119,7 @@ function bindEvents() {
         const marker = "uploading-" + Date.now();
         const ext = (img.type.split("/")[1] || "png").replace("jpeg", "jpg");
         document.execCommand("insertText", false, `![${marker}](${marker})`);
+        pasteTargets.set(marker, editingCid);   // 落盘往返期间用户可能切块/提交，按 cid 找回
         const reader = new FileReader();
         reader.onload = () => Bridge.call("images.savePasted", {
           dataUrl: String(reader.result), ext, marker,
@@ -1192,20 +1232,42 @@ function relightEditing() {
   el.innerHTML = highlightEditableSource(src);
   if (off !== null) setCaretTextOffset(el, off);
   updateMarksActive();
-  updateStatus();
+  notifyChanged();   // 输入即防抖推送活文本（原生侧 markdown/edited/自动保存全程保鲜）
 }
 
-// 序列化时以编辑中块的 DOM 活文本替换其旧 source（状态栏实时字数/块型）
-function liveMarkdown() {
-  if (!editingCid) return getMarkdown();
-  const b = findBlock(editingCid);
-  const el = write().querySelector(`[data-cid="${editingCid}"]`);
-  if (!b || !el) return getMarkdown();
-  const saved = b.source;
-  b.source = el.textContent.replace(/\u00a0/g, " ");
-  const md = getMarkdown();
-  b.source = saved;
-  return md;
+// 三态活文本快照（评审 P0 根因修复）：普通块编辑态活在 DOM、代码/公式块活在
+// CodeMirror、单元格活在 td —— 而保存/导出/undo 快照/状态栏全都要读"现在的内容"。
+// 借用-恢复写法：临时替换对应块 source → fn() → 还原，不动 blocks 真身与 undo 语义。
+function withLiveBlocks(fn) {
+  const saved = [];
+  const apply = (b, val) => { saved.push([b, b.source]); b.source = val; };
+  if (editingCid) {
+    const b = findBlock(editingCid);
+    const el = write().querySelector(`[data-cid="${editingCid}"]`);
+    if (b && el && el.isContentEditable) apply(b, el.textContent.replace(/\u00a0/g, " "));
+  }
+  if (editingCm) {
+    const { cid, cm, langInput, kind } = editingCm;
+    const b = findBlock(cid);
+    if (b) {
+      const body = cm.getValue().replace(/\s+$/, "");
+      const lang = ((langInput && langInput.value) || "").trim();
+      apply(b, kind === "math" ? "$$\n" + body + "\n$$"
+        : "```" + lang + (body ? "\n" + body : "") + "\n```");
+    }
+  }
+  if (cellEditing) {
+    const b = findBlock(cellEditing.cid);
+    const td = cellEditing.td;
+    if (b && td && td.isConnected) {
+      const r = +td.dataset.r, c = +td.dataset.c;
+      const text = td.textContent.replace(/\u00a0/g, " ");
+      if (text !== (tableGetCell(b.source, r, c) ?? "")) {
+        apply(b, tableSetCell(b.source, r, c, text));
+      }
+    }
+  }
+  try { return fn(); } finally { for (const [b, src] of saved) b.source = src; }
 }
 
 function caretAtStart(el) {
@@ -1281,10 +1343,11 @@ function openMarkdown(md, resetHistory = true) {
   updateStatus();
 }
 
-function getMarkdown() { return serializeBlocks(blocks); }
+// 活文本序列化：任何出口（原生拉取/导出/同步推送）都读到三层编辑态的当前内容
+function getMarkdown() { return withLiveBlocks(() => serializeBlocks(blocks)); }
 
 function getExportHtml() {
-  const body = blocks.map(blockHtml).join("");
+  const body = withLiveBlocks(() => blocks.map(blockHtml).join(""));
   const css = [...document.querySelectorAll("style,link[rel=stylesheet]")]
     .map(n => n.outerHTML).join("\n");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${document.title}</title>${css}</head><body><div id="write" class="write export">${body}</div></body></html>`;
@@ -1591,15 +1654,29 @@ function bindSidebarEvents() {
   });
 }
 
-// 原生 → JS：粘贴图片落盘完成（占位 → 替换）
+// 原生 → JS：粘贴图片落盘完成（占位 → 替换）。按 marker→cid 定位目标块——
+// 落盘期间用户可能已切块（旧实现依赖 editingCid，占位符会悬死落盘/误写他块）。
 Bridge.register("images.onSaved", data => {
-  const el = editingCid ? write().querySelector(`[data-cid="${editingCid}"]`) : null;
-  if (!el || !data.marker || !data.url) return;
-  el.textContent = el.textContent.replace(`![${data.marker}](${data.marker})`,
-                                            `![](${data.url})`);
-  relightEditing();
-  const b = findBlock(editingCid);
-  if (b) { b.source = el.textContent; reclassify(b); notifyChanged(); }
+  const marker = data.marker || "";
+  const cid = pasteTargets.has(marker) ? pasteTargets.get(marker) : editingCid;
+  pasteTargets.delete(marker);
+  const b = findBlock(cid);
+  if (!b || !marker) return;
+  const oldStr = `![${marker}](${marker})`;
+  const newStr = data.url ? `![](${data.url})` : "";
+  const el = (editingCid === cid) ? write().querySelector(`[data-cid="${cid}"]`) : null;
+  if (el && el.isContentEditable) {
+    const off = caretTextOffset(el);
+    el.textContent = el.textContent.split(oldStr).join(newStr);
+    relightEditing();
+    if (off !== null) setCaretTextOffset(el, Math.max(0, off - (oldStr.length - newStr.length)));
+  } else {
+    b.source = b.source.split(oldStr).join(newStr);
+    reclassify(b);
+    rerenderBlock(b);
+  }
+  notifyChanged();
+  if (!data.url) toast("图片未保存（未命名文档或写入失败），已移除占位符");
 });
 
 // ---------- 打字机 / 专注模式 ----------
@@ -1711,6 +1788,8 @@ window.Editor = {
     if (td) enterCellEdit(blockEl, td);
   },
   _commitCellEdit: commitCellEdit,
+  _setCmValue: v => { if (editingCm) editingCm.cm.setValue(v); },   // 测试钩子：CM 活文本注入
+  _pasteTargets: () => pasteTargets,                                // 测试钩子：贴图登记表
   _pasteText: insertPastedText,
   _findState: () => ({ hits: findHits.length, idx: findIdx }),
   _assetBase: b => { assetBase = b; enhanceImages(); },

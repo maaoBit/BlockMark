@@ -21,18 +21,20 @@ export function renderInline(md) {
   // 1.6 脚注引用 [^id] → 上标
   s = s.replace(/\[\^([^\]\n]+)\](?!\()/g, (_, id) =>
     `<sup class="bm-fnref" data-fn="${id}">${id}</sup>`);
+  // 1.7 URL scheme 白名单：javascript:/data: 等可执行 scheme 一律钝化为 #（防注入软防线）
+  const safeUrl = u => /^[a-z][a-z0-9+.-]*:/i.test(u) && !/^(https?|mailto|file):/i.test(u) ? "#" : u;
   // 2. 图片（在链接前处理）
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g,
     (_, alt, src, title) =>
-      `<img src="${src}" alt="${alt}"${title ? ` title="${title}"` : ""} loading="lazy">`);
+      `<img src="${safeUrl(src)}" alt="${alt}"${title ? ` title="${title}"` : ""} loading="lazy">`);
   // 3. 链接
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g,
     (_, text, href, title) =>
-      `<a href="${href}"${title ? ` title="${title}"` : ""} target="_blank" rel="noopener">${text}</a>`);
-  // 4. 粗体（**x** 或 __x__）
-  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/(^|[\s(])__([^_\n]+)__(?=$|[\s).,!?，。！？])/g, "$1<strong>$2</strong>");
-  // 5. 斜体（*x* 或 _x_，避开词中下划线的粗判）
+      `<a href="${safeUrl(href)}"${title ? ` title="${title}"` : ""} target="_blank" rel="noopener">${text}</a>`);
+  // 4. 粗体（**x** / __x__；内容允许单 * —— 嵌套强调 **a *b* c** 的外层不能被 [^*] 拦死）
+  s = s.replace(/\*\*([^\n]+?)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[\s(])__([^\n]+?)__(?=$|[\s).,!?，。！？])/g, "$1<strong>$2</strong>");
+  // 5. 斜体（*x* 或 _x_，避开词中下划线的粗判；在 strong 之后处理内层）
   s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,!?，。！？])|(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?，。！？])/g,
     "$1$3<em>$2$4</em>");
   // 6. 还原行内代码
@@ -67,9 +69,9 @@ function collectMarkerRanges(src) {
   const masked = src.split("");
   const mask = (s, e) => { for (let i = s; i < e; i++) masked[i] = MASK; };
 
-  // 1) 行内代码：`...` 定界符是反引号串
+  // 1) 行内代码：`...` 定界符是反引号串（不跨行 —— 与渲染侧 per-line 一致）
   let m;
-  const codeRe = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g;
+  const codeRe = /(`+)([^`\n]+?)\1(?!`)/g;
   while ((m = codeRe.exec(src))) {
     const ticks = m[1].length;
     ranges.push({ wrapS: m.index, wrapE: m.index + ticks, cs: m.index, ce: m.index + m[0].length });
@@ -79,8 +81,8 @@ function collectMarkerRanges(src) {
   }
   const text = masked.join("");
 
-  // 2) 粗体：**x** / __x__（在代码掩码之外）
-  const strongRe = /(\*\*|__)(?=\S)([\s\S]*?\S)\1/g;
+  // 2) 粗体：**x** / __x__（在代码掩码之外；不跨行）
+  const strongRe = /(\*\*|__)(?=\S)([^\n]*?\S)\1/g;
   while ((m = strongRe.exec(text))) {
     const d = m[1].length;
     ranges.push({ wrapS: m.index, wrapE: m.index + d, cs: m.index, ce: m.index + m[0].length });

@@ -63,15 +63,26 @@ final class MarkdownDocument: NSDocument {
         let oldURL = fileURL
         wc.pullLatestMarkdown { [weak self] in
             guard let self else { return }
-            // 用户显式保存 = 授权覆盖磁盘（解除冲突保持状态）
-            self.conflictNotified = false
             self.autosaveWork?.cancel()
             self.autosaveWork = nil
             self.performSave(to: url, ofType: typeName, for: saveOperation,
                              delegate: delegate, didSave: didSave, contextInfo: contextInfo)
+            // 成功核对后才解除冲突保持：写失败（磁盘满/权限）时提前清账会让在途外部事件
+            // 直接走"纯外部变更自动重载"覆盖本地编辑（评审 P1）
+            if let saved = self.fileURL, (try? String(contentsOf: saved, encoding: .utf8)) == self.markdown {
+                self.conflictNotified = false
+                self.lastSyncedContent = self.markdown
+            }
             self.editorWC?.pushJs("Editor.markSaved(false)")
-            // 首次保存/另存为换了路径 → 重建外部修改监听
-            if self.fileURL != oldURL { self.startWatching() }
+            // 首次保存/另存为换了路径 → 重建监听 + 刷新图片基准目录与侧栏根
+            // （assetBase 不刷：贴图落新目录却仍按旧目录解析 → 404，评审 P1）
+            if self.fileURL != oldURL {
+                self.startWatching()
+                if let dir = self.fileURL?.deletingLastPathComponent() {
+                    self.editorWC?.dispatchToJs("doc.baseDir", ["base": dir.absoluteString + "/"])
+                    self.editorWC?.dispatchToJs("library.onRoot", ["root": dir.path, "current": self.fileURL?.path ?? ""])
+                }
+            }
         }
     }
 
@@ -82,7 +93,7 @@ final class MarkdownDocument: NSDocument {
     }
 
     override func data(ofType typeName: String) throws -> Data {
-        lastSyncedContent = markdown
+        // lastSyncedContent 不在此提前改：写盘若失败，提前对账会误放开外部重载（改由 save 成功核对收口）
         guard let data = markdown.data(using: .utf8) else {
             throw NSError(domain: "BlockMark", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "编码失败"])
@@ -169,28 +180,34 @@ final class MarkdownDocument: NSDocument {
             toast("文件已被移动或删除，当前内容仍在编辑器中")
             return
         }
-        if disk == markdown {
-            // 自己的写入回流
-            lastSyncedContent = disk
-            return
-        }
-        if disk == lastSyncedContent {
-            // 外部无实质变化（例如外部工具写回相同内容）
-            return
-        }
-        if markdown == lastSyncedContent {
-            // 本地无未同步编辑 → 纯外部变更，自动重载
-            markdown = disk
-            lastSyncedContent = disk
-            editorWC?.sendMarkdown(disk)
-            toast("文件已被其他程序修改，已重新加载")
-        } else {
-            // 双方都改 → 冲突，保留本地；挂起在途自动保存，兑现"⌘S 才覆盖"承诺
-            autosaveWork?.cancel()
-            autosaveWork = nil
-            if !conflictNotified {
-                conflictNotified = true
-                toast("检测到外部修改与本编辑未保存内容冲突，已保留本地版本（⌘S 将覆盖磁盘）")
+        // 先拉 webview 活文本再三方比较：JS 推送有 400ms 防抖，窗口内的敲字
+        // 若不拉取会被判成"纯外部变更"而自动重载吞掉（评审 P1）
+        guard let wc = editorWC else { return }
+        wc.pullLatestMarkdown { [weak self] in
+            guard let self else { return }
+            if disk == self.markdown {
+                // 自己的写入回流
+                self.lastSyncedContent = disk
+                return
+            }
+            if disk == self.lastSyncedContent {
+                // 外部无实质变化（例如外部工具写回相同内容）
+                return
+            }
+            if self.markdown == self.lastSyncedContent {
+                // 本地无未同步编辑 → 纯外部变更，自动重载
+                self.markdown = disk
+                self.lastSyncedContent = disk
+                self.editorWC?.sendMarkdown(disk)
+                self.toast("文件已被其他程序修改，已重新加载")
+            } else {
+                // 双方都改 → 冲突，保留本地；挂起在途自动保存，兑现"⌘S 才覆盖"承诺
+                self.autosaveWork?.cancel()
+                self.autosaveWork = nil
+                if !self.conflictNotified {
+                    self.conflictNotified = true
+                    self.toast("检测到外部修改与本编辑未保存内容冲突，已保留本地版本（⌘S 将覆盖磁盘）")
+                }
             }
         }
     }
