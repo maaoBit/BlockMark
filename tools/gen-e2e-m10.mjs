@@ -38,7 +38,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("bm-table-zoom").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await sleep(20);
     r.backdropClose = !document.getElementById("bm-table-zoom").classList.contains("show");
-    // 6) 右键菜单含"放大查看表格"；命令直发可开
+    // 6) 宽表自适配：长文本单元格折行，无横向溢出（大视图目标=一页看完）
+    Editor.open("| 列一 | 列二 |\\n|---|---|\\n| 这是一段非常长的单元格文本用来验证放大视图里会自动折行而不是横向撑开表格导致需要左右滑动查看 " +
+      "https://example.com/a/very/long/path/that/should/wrap/inside/the/cell/without/horizontal/scroll | 短 |\\n");
+    const wcid = document.querySelector('[data-type="table"]').dataset.cid;
+    block(wcid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await sleep(30);
+    const ov2 = document.getElementById("bm-table-zoom");
+    const sc = ov2.querySelector(".bm-table-zoom-scroll");
+    r.fitNoHScroll = sc.scrollWidth <= sc.clientWidth + 1;
+    const longTd = [...ov2.querySelectorAll("td")].find(c => c.textContent.includes("非常长"));
+    r.longTextWrapped = !!longTd && longTd.clientHeight > 24;   // 多行（行高~24px，折行后更高）
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await sleep(20);
+
+    // 7) 右键菜单含"放大查看表格"；命令直发可开
     const orig = Bridge.call.bind(Bridge);
     let cap = null;
     Bridge.call = (n, d) => { if (n === "menu.showContext") cap = d; else orig(n, d); };

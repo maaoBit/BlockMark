@@ -433,14 +433,18 @@ td.bm-cell-editing, th.bm-cell-editing {
 }
 .bm-table-zoom-bar button:hover { background: var(--hover-bg); color: var(--accent); }
 .bm-table-zoom-scroll {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;   /* 大视图目标=一页看完：表宽自适应卡片，文本折行，不横向滚 */
   padding: 16px 18px;
 }
-.bm-table-zoom-scroll table { width: max-content; border-collapse: collapse; font-size: 0.98em; }
+.bm-table-zoom-scroll table { width: 100%; border-collapse: collapse; font-size: 1.0em; }
 .bm-table-zoom-scroll th, .bm-table-zoom-scroll td {
   border: 1px solid var(--border);
   padding: 7px 14px;
-  min-width: 5em;
-  white-space: pre-wrap;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;   /* 长文本/无空格长串（URL）都可在任意字符处折行 */
+  word-break: break-word;
+  vertical-align: top;
 }
 .bm-table-zoom-scroll th { background: var(--code-bg); position: sticky; top: 0; z-index: 1; }
