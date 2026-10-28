@@ -22,7 +22,7 @@ export function classifyBlock(source, atDocStart = false) {
   const h = first.match(HEADING);
   if (h && lines.length === 1) return { type: "heading", level: h[1].length };
   // setext 标题：单行文本 + =/- 下划线行（首行须是普通文本，排除与 hr/列表/围栏的歧义）
-  if (lines.length === 2 && !FENCE.test(first) && !HR.test(first) && !UL_ITEM.test(first) &&
+  if (lines.length === 2 && !HEADING.test(first) && !FENCE.test(first) && !HR.test(first) && !UL_ITEM.test(first) &&
       !OL_ITEM.test(first) && !QUOTE.test(first) && !TABLE_ROW.test(first)) {
     if (/^=+\s*$/.test(lines[1])) return { type: "heading", level: 1 };
     if (/^-+\s*$/.test(lines[1])) return { type: "heading", level: 2 };

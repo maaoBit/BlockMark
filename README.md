@@ -37,10 +37,10 @@ open build/BlockMark.app
 ## 测试
 
 ```bash
-npm test          # 单测 87 项（解析器 40/行内编辑 20/语法面 27）
+npm test          # 单测 136 项（解析器 89/行内编辑 20/语法面 27）
 ```
 
-e2e 七套（m1/cm/m2b/m3/m45/look/tail）：`node tools/gen-e2e-<name>.mjs` 生成
+e2e 十二套（m1/cm/m2b/m3/m45/look/tail/m6–m10）：`node tools/gen-e2e-<name>.mjs` 生成
 `EditorResources/e2e-<name>.html`，headless Chromium/Edge `--dump-dom` 断言 `<title>`：
 
 ```bash
@@ -76,9 +76,9 @@ MVP 已实现：paragraph / h1-h6 / 引用 / 有序无序列表 / 围栏代码 /
 
 - [x] 长尾功能轮（2026-10-11 完成）：**查找 ⌘F**（顶部浮条+全文 mark 高亮+Enter/Shift+Enter 跳转+计数，关闭 unwrap 恢复）；**表格逐单元格编辑**（渲染态 td/th contenteditable，点击显示该格源码，blur/Esc 写回，Tab/Shift+Tab 左右、Enter 下行同列、末行 Enter 出表格续写段落，`\|` 转义往返）；**右键菜单**（JS 收集上下文→桥→原生 NSMenu 按右键位置弹出：剪切/拷贝/粘贴（原生 pasteboard）/打开链接/拷贝链接/图片另存为/加粗/斜体）；**拖拽打开**（.md 拖入窗口→DropView→原生 odoc，NSWindow 拖拽方法不可 override 故挂 contentView）；**Pandoc 导出 Word**（-f gfm -t docx，stdin 管道；未装提示 brew install pandoc）；**URL 智能粘贴**（选中文本+粘贴 URL→[文本](URL)）；**图片点击 lightbox 预览**；**图片相对路径修复**（doc.baseDir 桥推文档目录 file URL 前缀+loadFileURL 读权限放宽到根——此前贴图 404）；任务列表删除线增强。单测 87（parser 40）+ TAIL-E2E PASS（表格导航/查找/粘贴/lightbox/图片 base/删除线）
 
-- 单测：`node test/parser.test.mjs`（40）+ `test/m1.test.mjs`（20）+ `test/m2b.test.mjs`（27）
-- e2e（全部基于 index.bundle.html 生成，Edge headless `--dump-dom` 断言 title）：`tools/gen-e2e-{m1,cm,m2b,m3,m45,look,tail}.mjs` 七套；look 套走 getComputedStyle 静态计算值断言观感（字号比/底色/列宽——dump-dom 无渲染循环，但 computed style 静态值可用，只有 transition 动画值不可靠）；link 样式表 CSSOM 在 headless 有读竞态，CSS 规则断言走构建期文件级 grep
-- **坑**：file:// + ES module 直连在 headless 下加载竞态 flaky（test/e2e-harness.html 旧基建已弃用，迁 bundle 基建后稳定）；JS `String.replace` 替换串里 `$$` 是转义序列（生成器必须用函数形式 `replace(x, () => v)`）
+- 单测：`node test/parser.test.mjs`（89）+ `test/m1.test.mjs`（20）+ `test/m2b.test.mjs`（27）
+- e2e（全部基于 index.bundle.html 生成，Edge headless `--dump-dom` 断言 title）：`tools/gen-e2e-{m1,cm,m2b,m3,m45,look,tail,m6,m7,m8,m9,m10}.mjs` 十二套；look 套走 getComputedStyle 静态计算值断言观感（字号比/底色/列宽——dump-dom 无渲染循环，但 computed style 静态值可用，只有 transition 动画值不可靠）；link 样式表 CSSOM 在 headless 有读竞态，CSS 规则断言走构建期文件级 grep
+- **坑**：file:// + ES module 直连在 headless 下加载竞态 flaky（test/e2e-harness.html 旧基建已弃用，迁 bundle 基建后稳定；module 调试路径可用——bridge.js 已补副作用导入）；JS `String.replace` 替换串里 `$$` 是转义序列（生成器必须用函数形式 `replace(x, () => v)`）
 - 真机验证：`open -a build/BlockMark.app <file>`（**裸二进制直跑 argv 不会被 AppKit 打开**——此前"argv 打开"实为 macOS 窗口恢复的假象，已实证）；截图走 `screencapture -l <winid>`
 
 ### M4 调试沉淀的 AppKit 坑

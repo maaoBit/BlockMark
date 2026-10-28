@@ -117,6 +117,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     block(sx).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(30);
     r.setextCommit = !!block(sx).querySelector("h1") && Editor.getMarkdown().includes("标题行");
+    // 发布评审 P0 回归：setext 渲染态/导出不得把下划线 ===/--- 当标题文字渲染
+    Editor.open("标题甲\\n===\\n\\n小节乙\\n---\\n");
+    await sleep(30);
+    const h1el = document.querySelector('[data-type="heading"][data-level="1"] h1');
+    const h2el = document.querySelector('[data-type="heading"][data-level="2"] h2');
+    r.setextRenderText = !!h1el && h1el.textContent === "标题甲" && !h1el.textContent.includes("===") &&
+                         !!h2el && h2el.textContent === "小节乙" && !h2el.textContent.includes("---");
+    r.setextExportClean = !Editor.getExportHtml().match(/<h1[^>]*>[^<]*===/);
+    const ocid = document.querySelector('[data-type="heading"][data-level="1"]').dataset.cid;
+    Editor._enterEdit(ocid);   // 显式定目标（format 兜底链的 lastFocusedCid 可能指上个用例的旧 cid）
+    Editor.format("h2");       // setext 源升降级须归一为 ATX（旧版静默无效）
+    block(ocid).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await sleep(30);
+    await sleep(30);
+    r.setextFormat = Editor.getMarkdown().includes("## 标题甲") && !Editor.getMarkdown().includes("===");
 
     const pre = document.createElement("pre");
     pre.id = "e2e-result";

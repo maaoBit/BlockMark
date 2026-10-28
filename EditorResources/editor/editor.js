@@ -7,6 +7,7 @@
 //   - 事实源是块对象的 source 字段，DOM 由它派生
 import { parseBlocks, serializeBlocks, reclassify, classifyBlock, mathTex, toggleTaskItem, tableGetCell, tableSetCell, tableParse, tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol } from "./parser.js";
 import { renderInline, renderTable, escapeHtml, highlightEditableSource } from "./inline.js";
+import "./bridge.js";   // 副作用导入：注册 window.Bridge（module 调试路径此前因缺它整体瘫痪）
 
 const write = () => document.getElementById("write");
 const scroller = () => document.getElementById("bm-main"); // 滚动容器：全宽 .bm-main（.write 只限宽居中）
@@ -48,12 +49,20 @@ function blockHtml(b) {
   return `<div class="bm-block" data-cid="${b.cid}" data-type="${b.type}"${levelAttr}>${inner}</div>`;
 }
 
+// 标题显示文本：剥 ATX 前缀；setext 源（标题\n=== / \n---）按 level 剥下划线行——
+// 否则定界符会原样渲染进标题/大纲/导出（发布评审 P0）
+function headingText(b) {
+  let text = b.source.replace(/^#{1,6}\s+/, "");
+  if (b.level === 1) text = text.replace(/\n=+\s*$/, "");
+  else if (b.level === 2) text = text.replace(/\n-+\s*$/, "");
+  return text;
+}
+
 function renderBlockInner(b) {
   const src = b.source;
   switch (b.type) {
     case "heading": {
-      const text = src.replace(/^#{1,6}\s+/, "");
-      return `<h${b.level} class="bm-render">${renderInline(text)}</h${b.level}>`;
+      return `<h${b.level} class="bm-render">${renderInline(headingText(b))}</h${b.level}>`;
     }
     case "hr":
       return `<hr class="bm-render">`;
@@ -545,7 +554,7 @@ function format(cmd) {
       // 编辑中：以 DOM 活文本为基准就地变换，保持编辑态与光标（rerender 会打断编辑）
       const edEl = write().querySelector(`[data-cid="${targetCid}"]`);
       if (!edEl) return;
-      const live = edEl.textContent.replace(/\u00a0/g, " ").replace(/^#{1,6}\s+/, "");
+      const live = edEl.textContent.replace(/\u00a0/g, " ").replace(/^#{1,6}\s+/, "").replace(/\n[=-]+\s*$/, "");
       b.source = "#".repeat(lvl) + " " + live;
       reclassify(b);
       edEl.dataset.type = b.type;
@@ -556,7 +565,7 @@ function format(cmd) {
       notifyChanged();
       return;
     }
-    b.source = b.source.replace(/^#{1,6}\s+/, "").replace(/^(?=#)/, "#".repeat(lvl) + " ");
+    b.source = b.source.replace(/^#{1,6}\s+/, "").replace(/\n[=-]+\s*$/, "").replace(/^(?=#)/, "#".repeat(lvl) + " ");
     reclassify(b);
     rerenderBlock(b);
     notifyChanged();
@@ -1715,7 +1724,7 @@ function renderOutline(body) {
   if (!hs.length) { body.innerHTML = '<div class="bm-sidebar-empty">无标题</div>'; return; }
   body.innerHTML = hs.map(h => {
     const pad = 8 + (h.level - 1) * 14;
-    const text = escapeHtml(h.source.replace(/^#{1,6}\s+/, ""));
+    const text = escapeHtml(headingText(h));
     return `<div class="bm-outline-item" data-cid="${h.cid}" style="padding-left:${pad}px">${text}</div>`;
   }).join("");
 }

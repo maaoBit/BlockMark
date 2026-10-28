@@ -76,6 +76,11 @@ function collectMarkerRanges(src) {
   const masked = src.split("");
   const mask = (s, e) => { for (let i = s; i < e; i++) masked[i] = MASK; };
 
+  // 0) 反斜杠转义对：\X 两字符整体掩码（渲染态 \* 是字面量，编辑态不得标成定界符——两视图一致）
+  let m0;
+  const escRe0 = /\\([!"#$%&'()*+,./:;<=>?@[\\\]^_`{|}~-])/g;
+  while ((m0 = escRe0.exec(src))) mask(m0.index, m0.index + 2);
+
   // 1) 行内代码：`...` 定界符是反引号串（不跨行 —— 与渲染侧 per-line 一致）
   let m;
   const codeRe = /(`+)([^`\n]+?)\1(?!`)/g;

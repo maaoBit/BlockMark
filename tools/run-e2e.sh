@@ -1,5 +1,5 @@
 #!/bin/zsh
-# BlockMark — e2e 运行器：bundle → 生成七套 → headless 浏览器断言 <title>
+# BlockMark — e2e 运行器：bundle → 生成十二套 → headless 浏览器断言 <title>
 # 用法: ./tools/run-e2e.sh [浏览器路径]
 #   浏览器需 Chromium 内核（Edge/Chrome 均可）；缺省按序探测。
 set -uo pipefail
