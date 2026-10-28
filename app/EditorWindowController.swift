@@ -395,6 +395,17 @@ final class EditorWindowController: NSWindowController {
         closeFlowDone = false
     }
 
+    // MARK: - 存储 ⌘S / 另存为 ⇧⌘S（菜单 action 经响应链到 window delegate = 本控制器，转发给文档）
+
+    @objc func saveMenuAction(_ sender: Any?) {
+        // NSDocument.save(_:) 全流程：已命名文件就地写，未命名文档弹存储面板
+        mdDocument?.save(sender)
+    }
+
+    @objc func saveAsMenuAction(_ sender: Any?) {
+        mdDocument?.saveAs(sender)
+    }
+
     // MARK: - 查找 ⌘F（编辑器内 findbar）
 
     @objc func findAction(_ sender: Any?) {

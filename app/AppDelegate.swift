@@ -104,8 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileSubMenu.addItem(.separator())
         fileSubMenu.addItem(withTitle: "关闭", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileSubMenu.addItem(.separator())
-        fileSubMenu.addItem(withTitle: "存储", action: #selector(NSDocument.save(_:)), keyEquivalent: "s")
-        fileSubMenu.addItem(withTitle: "另存为…", action: #selector(NSDocument.saveAs(_:)), keyEquivalent: "S")
+        // 存储/另存为须经 EditorWindowController 转发（它以 window delegate 身份在响应链上）：
+        // 直指 NSDocument.save: 的 nil-target action 在程序化窗口链路无人认领 → 菜单恒灰（同"检查更新"旧病）
+        fileSubMenu.addItem(withTitle: "存储", action: #selector(EditorWindowController.saveMenuAction(_:)), keyEquivalent: "s")
+        fileSubMenu.addItem(withTitle: "另存为…", action: #selector(EditorWindowController.saveAsMenuAction(_:)), keyEquivalent: "S")
         fileSubMenu.addItem(.separator())
         let exportHTML = fileSubMenu.addItem(withTitle: "导出 HTML…", action: #selector(EditorWindowController.exportHTML(_:)), keyEquivalent: "h")
         exportHTML.keyEquivalentModifierMask = [.command, .shift]
