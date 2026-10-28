@@ -858,11 +858,12 @@ function openTableZoom(cid) {
     ov.innerHTML = `<div class="bm-table-zoom-card">` +
       `<div class="bm-table-zoom-bar"><span class="bm-table-zoom-title"></span>` +
       `<span>只读预览 · Esc 关闭</span><button type="button" class="bm-zoom-reset" title="恢复自动列宽">重置列宽</button>` +
-      `<button type="button" title="关闭">\u2715</button></div>` +
+      `<button type="button" class="bm-zoom-close" title="关闭">\u2715</button></div>` +
       `<div class="bm-table-zoom-scroll"></div></div>`;
     document.body.appendChild(ov);
     ov.addEventListener("mousedown", e => { if (e.target === ov) closeTableZoom(); });   // 点背景关
-    ov.querySelector(".bm-table-zoom-bar button").addEventListener("click", closeTableZoom);
+    // 按类名精确接线（曾用"bar 内第一个 button"选关闭键——加重置键后错挂，✕ 变孤儿）
+    ov.querySelector(".bm-zoom-close").addEventListener("click", closeTableZoom);
     document.addEventListener("keydown", e => {
       if (e.key === "Escape" && document.getElementById("bm-table-zoom")?.classList.contains("show")) {
         e.preventDefault();

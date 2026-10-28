@@ -104,7 +104,29 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(20);
 
-    // 8) 右键菜单含"放大查看表格"；命令直发可开
+    // 8) 顶栏按钮各司其职：重置列宽不关视图；✕ 关闭
+    Editor.open("| A | B |\\n|---|---|\\n| 1 | 2 |\\n");
+    const zcid = document.querySelector('[data-type="table"]').dataset.cid;
+    block(zcid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await sleep(30);
+    const ov4 = document.getElementById("bm-table-zoom");
+    const ths4 = [...ov4.querySelectorAll("thead th")];
+    const h4 = ths4[0].querySelector(".bm-zoom-colhandle");
+    if (h4) {
+      const x4 = ths4[0].getBoundingClientRect().right;
+      h4.dispatchEvent(new PointerEvent("pointerdown", { clientX: x4, pointerId: 11, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: x4 + 60, pointerId: 11, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 11, bubbles: true }));
+      await sleep(20);
+    }
+    ov4.querySelector(".bm-zoom-reset").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await sleep(20);
+    r.resetKeepsOpen = ov4.classList.contains("show") && ths4.every(t => t.style.width === "");
+    ov4.querySelector(".bm-zoom-close").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await sleep(20);
+    r.closeBtnWorks = !ov4.classList.contains("show");
+
+    // 9) 右键菜单含"放大查看表格"；命令直发可开
     const orig = Bridge.call.bind(Bridge);
     let cap = null;
     Bridge.call = (n, d) => { if (n === "menu.showContext") cap = d; else orig(n, d); };
