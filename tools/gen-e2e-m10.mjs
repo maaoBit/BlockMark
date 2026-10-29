@@ -126,7 +126,53 @@ window.addEventListener("DOMContentLoaded", async () => {
     await sleep(20);
     r.closeBtnWorks = !ov4.classList.contains("show");
 
-    // 9) 右键菜单含"放大查看表格"；命令直发可开
+    // 9) 卡片整体缩放：se 斜拉宽高同变、e/s 单轴、表格跟随重排且零横滚、重开重置
+    Editor.open("| A | B |\\n|---|---|\\n| 1 | 2 |\\n");
+    const zwcid = document.querySelector('[data-type="table"]').dataset.cid;
+    block(zwcid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await sleep(30);
+    const ov5 = document.getElementById("bm-table-zoom");
+    const card5 = ov5.querySelector(".bm-table-zoom-card");
+    const sc5 = ov5.querySelector(".bm-table-zoom-scroll");
+    const se = card5.querySelector(".bm-zoom-winhandle.se");
+    const ee = card5.querySelector(".bm-zoom-winhandle.e");
+    r.winHandles = !!se && !!ee;
+    if (se) {
+      const w0 = card5.offsetWidth, h0 = card5.offsetHeight;
+      const p0 = { x: card5.getBoundingClientRect().right, y: card5.getBoundingClientRect().bottom };
+      se.dispatchEvent(new PointerEvent("pointerdown", { clientX: p0.x, clientY: p0.y, pointerId: 21, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: p0.x + 150, clientY: p0.y + 100, pointerId: 21, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 21, bubbles: true }));
+      await sleep(20);
+      r.seResizeBoth = card5.offsetWidth === w0 + 150 && card5.offsetHeight === h0 + 100;
+      r.tableFollows = sc5.scrollWidth <= sc5.clientWidth + 1;
+      // 单轴：e 只变宽
+      const ex = card5.getBoundingClientRect().right;
+      ee.dispatchEvent(new PointerEvent("pointerdown", { clientX: ex, clientY: p0.y, pointerId: 22, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: ex - 60, clientY: p0.y, pointerId: 22, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 22, bubbles: true }));
+      await sleep(20);
+      r.eResizeWidthOnly = card5.offsetWidth === w0 + 90 && card5.offsetHeight === h0 + 100;
+      // 下限钳制
+      const hStart = card5.offsetHeight;
+      const sy2 = card5.getBoundingClientRect().bottom;
+      ee.dispatchEvent(new PointerEvent("pointerdown", { clientX: card5.getBoundingClientRect().right, clientY: 0, pointerId: 23, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: card5.getBoundingClientRect().right, clientY: sy2 - 5000, pointerId: 23, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 23, bubbles: true }));
+      await sleep(20);
+      r.minClamp = card5.offsetHeight >= 200 - 1;
+      if (card5.offsetHeight !== hStart) { /* 高度被钳到 200：恢复现场供下个断言 */ }
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await sleep(20);
+      // 重开：手动高度清零（宽度重钉）
+      block(zwcid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      await sleep(30);
+      r.reopenResets = !card5.style.height;
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await sleep(20);
+    }
+
+    // 10) 右键菜单含"放大查看表格"；命令直发可开
     const orig = Bridge.call.bind(Bridge);
     let cap = null;
     Bridge.call = (n, d) => { if (n === "menu.showContext") cap = d; else orig(n, d); };

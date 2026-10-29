@@ -480,3 +480,29 @@ td.bm-cell-editing, th.bm-cell-editing {
 
 /* 拖拽进行中：禁选择，光标全局列宽调节 */
 .bm-zoom-dragging, .bm-zoom-dragging * { user-select: none; cursor: col-resize; }
+
+/* 卡片整体缩放（大视图右下角斜拉 + 右/下缘单轴）：改变查看页面大小，与列宽分配互补 */
+.bm-table-zoom-card { position: relative; }
+.bm-zoom-winhandle {
+  position: absolute;
+  z-index: 6;
+  touch-action: none;
+}
+.bm-zoom-winhandle.se {
+  right: 0; bottom: 0; width: 20px; height: 20px;
+  cursor: nwse-resize;
+}
+.bm-zoom-winhandle.se::after {
+  content: "";
+  position: absolute; right: 5px; bottom: 5px;
+  width: 9px; height: 9px;
+  border-right: 2px solid var(--fg-faint);
+  border-bottom: 2px solid var(--fg-faint);
+  border-radius: 1px;
+}
+.bm-zoom-winhandle.e { right: 0; top: 34px; bottom: 0; width: 7px; cursor: ew-resize; }
+.bm-zoom-winhandle.s { left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize; }
+.bm-zoom-winhandle:hover::after,
+.bm-zoom-winhandle.se:hover { border-color: transparent; }
+.bm-zoom-winhandle:hover { background: var(--block-hover); }
+.bm-zoom-winhandle.se:hover::after { border-right-color: var(--accent); border-bottom-color: var(--accent); }

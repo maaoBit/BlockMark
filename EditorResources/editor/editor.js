@@ -889,9 +889,11 @@ function openTableZoom(cid) {
   // 卡片宽度按 auto 表宽钉死（上限 94vw）：列宽拖拽的百分比基准自此稳定，
   // 切 fixed 布局后总宽不随内容涨缩（否则收缩到内容宽的卡片会被百分比反推着膨胀）
   const card = ov.querySelector(".bm-table-zoom-card");
+  card.style.height = "";   // 上次会话的手动缩放高度不带到本次（宽度本就每次重钉）
   const autoW = (scroll.querySelector("table")?.offsetWidth || 0) + 40;
   card.style.width = Math.min(autoW, Math.round(window.innerWidth * 0.94)) + "px";
   initZoomColResize(ov);
+  initZoomWinResize(ov);
 }
 
 // 大视图列宽拖拽（Excel 式）：拖边界 = 相邻两列像素此消彼长，总宽恒定（零横滚保证不破）。
@@ -962,6 +964,46 @@ function initZoomColResize(ov) {
     });
     h.addEventListener("dblclick", () => zoomColReset && zoomColReset());
   }
+}
+
+// 卡片整体缩放（se 斜拉 / e 右缘 / s 下缘）：改变查看页面大小，与列宽分配互补。
+// 与列宽拖拽同一套 window 级监听模型（把手随布局移动，绑自身必丢事件流）。
+const ZOOM_WIN_MIN_W = 320, ZOOM_WIN_MIN_H = 200;
+let zoomWinDrag = null;
+let zoomWinWired = false;
+
+function initZoomWinResize(ov) {
+  const card = ov.querySelector(".bm-table-zoom-card");
+  if (!card || card.dataset.winWired) return;
+  card.dataset.winWired = "1";
+  for (const dir of ["se", "e", "s"]) {
+    const h = document.createElement("div");
+    h.className = "bm-zoom-winhandle " + dir;
+    h.title = "拖动调整窗口大小";
+    card.appendChild(h);
+    h.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      if (zoomWinDrag) return;
+      const startW = card.offsetWidth, startH = card.offsetHeight;
+      const sx = e.clientX, sy = e.clientY;
+      const maxW = Math.round(window.innerWidth * 0.97), maxH = Math.round(window.innerHeight * 0.95);
+      document.body.style.cursor = dir === "e" ? "ew-resize" : dir === "s" ? "ns-resize" : "nwse-resize";
+      document.body.style.userSelect = "none";
+      zoomWinDrag = {
+        move: ev => {
+          if (dir !== "s") card.style.width = Math.min(maxW, Math.max(ZOOM_WIN_MIN_W, startW + ev.clientX - sx)) + "px";
+          if (dir !== "e") card.style.height = Math.min(maxH, Math.max(ZOOM_WIN_MIN_H, startH + ev.clientY - sy)) + "px";
+        },
+        end: () => { document.body.style.cursor = ""; document.body.style.userSelect = ""; },
+      };
+    });
+  }
+  if (zoomWinWired) return;
+  zoomWinWired = true;
+  window.addEventListener("pointermove", ev => { if (zoomWinDrag) zoomWinDrag.move(ev); });
+  const end = () => { if (zoomWinDrag) zoomWinDrag.end(); zoomWinDrag = null; };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
 }
 
 function closeTableZoom() {
