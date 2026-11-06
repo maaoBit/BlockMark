@@ -105,13 +105,20 @@ final class MarkdownDocument: NSDocument {
     }
 
     override func makeWindowControllers() {
-        // AppKit 的 odoc 流程会调用本方法两次（实证）：先清旧控制器与其窗口，保证幂等
+        presentEditorWindow(inheritingFrame: nil)
+    }
+
+    /// 建窗显示编辑器。AppKit 的 odoc 流程会把 makeWindowControllers 调用两次（实证）：
+    /// 先清旧控制器与其窗口，保证幂等。frame 非空时继承——侧栏原地换文档时接管原窗口
+    /// 位置尺寸，视觉上"原地换文档"不跳位。
+    func presentEditorWindow(inheritingFrame frame: NSRect?) {
         if let old = strongEditorWC {
             removeWindowController(old)
             old.window?.close()
             strongEditorWC = nil
         }
         let wc = EditorWindowController(document: self)
+        if let frame, let win = wc.window { win.setFrame(frame, display: false) }
         addWindowController(wc)
         strongEditorWC = wc
         wc.showWindow(nil)

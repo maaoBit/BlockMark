@@ -1873,8 +1873,8 @@ function bindSidebarEvents() {
       }
       const file = e.target.closest(".bm-tree-file, .bm-search-hit");
       if (file) {
-        currentFilePath = file.dataset.file;
-        Bridge.call("library.openFile", { path: file.dataset.file });
+        currentFilePath = file.dataset.file;   // 乐观高亮；原生取消/失败时经 onRoot 拨回
+        Bridge.call("library.openFile", { path: file.dataset.file, newWindow: !!e.metaKey });
         if (!searchMode) renderFileTree(els.body);
         return;
       }
@@ -1998,6 +1998,8 @@ Bridge.register("library.onRoot", data => {
   libraryRoot = data.root;
   currentFilePath = data.current || null;
   expandedDirs.add(data.root);
+  // 启动链路重绘幂等（随后 onDocs 会再渲染）；原生取消原地换文档时靠这次重绘拨回高亮
+  if (sidebarOpen && !searchMode) renderFileTree();
 });
 Bridge.register("library.onDocs", data => {
   dirCache.set(data.dir, data.entries || []);

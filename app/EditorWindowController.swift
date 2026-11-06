@@ -111,9 +111,16 @@ final class EditorWindowController: NSWindowController {
         case "library.listDocs":
             handleListDocs(data)
         case "library.openFile":
-            if let p = data["path"] as? String {
+            guard let p = data["path"] as? String else { return }
+            // 点的就是当前文档 → JS 乐观高亮已正确，无需动作
+            if mdDocument?.fileURL?.path == p { return }
+            if data["newWindow"] as? Bool == true || mdDocument == nil || window == nil {
+                // ⌘点击（或异常链路兜底）：显式开新窗
                 NSDocumentController.shared.openDocument(withContentsOf: URL(fileURLWithPath: p),
                                                           display: true) { _, _, _ in }
+            } else {
+                // 默认：当前窗口原地换文档
+                replaceCurrentDocument(with: URL(fileURLWithPath: p))
             }
         case "library.search":
             handleGlobalSearch(data)
@@ -351,39 +358,103 @@ final class EditorWindowController: NSWindowController {
         guard let doc = mdDocument, !closeFlowDone else { return true }
         guard !closeReviewInFlight else { return false }
         closeReviewInFlight = true
-        pullLatestMarkdown { [weak self] in
-            guard let self, let win = self.window else { return }
+        reviewUnsavedChanges(reason: "关闭") { [weak self] proceed in
+            guard let self else { return }
             self.closeReviewInFlight = false
+            if proceed { self.completeClose() }
+        }
+        return false
+    }
+
+    /// 未保存审查（关窗 / 原地换文档共用）：拉最新内容 + 冲刷自动保存，仍有未保存变更弹表单。
+    /// done(true) = 可安全放弃当前文档（已落盘或用户选“不存储”）；false = 用户取消或写失败。
+    private func reviewUnsavedChanges(reason: String, done: @escaping (Bool) -> Void) {
+        guard let doc = mdDocument else { done(true); return }
+        pullLatestMarkdown { [weak self] in
+            guard let self, let win = self.window, self.mdDocument === doc else { return }
             doc.flushAutosave()   // 文件型：防抖尾巴落盘并清 edited；未命名/写失败 → 保持 edited 过审
-            if !doc.isDocumentEdited { self.completeClose(); return }
+            if !doc.isDocumentEdited { done(true); return }
             let alert = NSAlert()
             alert.messageText = "要把对“\(doc.displayName ?? "未标记")”的更改存储吗？"
-            alert.informativeText = "关闭前存储更改，或选择“不存储”放弃。"
+            alert.informativeText = "\(reason)前存储更改，或选择“不存储”放弃。"
             alert.addButton(withTitle: "存储…")
             alert.addButton(withTitle: "取消")
             alert.addButton(withTitle: "不存储")
             alert.beginSheetModal(for: win) { [weak self] response in
                 guard let self else { return }
-                if response == .alertFirstButtonReturn { self.saveThenClose() }
-                else if response == .alertThirdButtonReturn { self.completeClose() }
-                // 取消 → 留在编辑器
+                switch response {
+                case .alertFirstButtonReturn: self.saveReviewed(reason: reason, done: done)   // 存储…
+                case .alertThirdButtonReturn: done(true)                                 // 不存储
+                default: done(false)                                                     // 取消 → 留在编辑器
+                }
             }
         }
-        return false
     }
 
-    private func saveThenClose() {
-        guard let doc = mdDocument else { completeClose(); return }
+    /// 审查表单“存储…”的落盘；done(false) = 写失败，操作取消留在编辑器
+    private func saveReviewed(reason: String, done: @escaping (Bool) -> Void) {
+        guard let doc = mdDocument else { done(true); return }
         let write: (URL) -> Void = { [weak self] url in
             guard let data = doc.markdown.data(using: .utf8),
                   (try? data.write(to: url, options: .atomic)) != nil else {
-                self?.toast("写入失败，未关闭")
+                self?.toast("写入失败，\(reason)已取消")
+                done(false)
                 return   // 写失败保持开窗，内容不丢
             }
-            self?.completeClose()
+            done(true)
         }
-        if let url = doc.fileURL { write(url); return; }
+        if let url = doc.fileURL { write(url); return }
         writePanel(defaultName: (doc.displayName ?? "未标记") + ".md") { url in write(url) }
+    }
+
+    // MARK: - 原地换文档（侧栏默认点击行为；⌘点击仍开新窗）
+
+    private var replaceInFlight = false   // 双击文件项防重入（审查/打开均异步，防双表单双替换）
+
+    /// 当前窗口原地换文档：未保存审查 → 静默打开新文档 → 继承窗口位置显示 → 关旧窗。
+    /// 顺序必须“先显新窗再关旧窗”：applicationShouldTerminateAfterLastWindowClosed=true，
+    /// 若先关旧窗，应用会在两步之间按“最后一窗已关”直接退出。
+    private func replaceCurrentDocument(with url: URL) {
+        guard !replaceInFlight else { return }
+        replaceInFlight = true
+        // 已在别的窗口打开 → 把那扇窗带前来即可（不动当前文档，无需审查）
+        if let existing = NSDocumentController.shared.documents.first(where: {
+            ($0 as? MarkdownDocument)?.fileURL == url
+        }) as? MarkdownDocument, existing !== mdDocument {
+            replaceInFlight = false
+            if let w = existing.editorWC?.window {
+                if w.isMiniaturized { w.deminiaturize(nil) }
+                w.makeKeyAndOrderFront(nil)
+            }
+            restoreSidebarHighlight()
+            return
+        }
+        let inheritFrame = window?.frame
+        reviewUnsavedChanges(reason: "切换文档") { [weak self] proceed in
+            guard let self else { return }
+            guard proceed else { self.abortReplace(); return }   // 取消审查 → 拨回高亮
+            NSDocumentController.shared.openDocument(withContentsOf: url, display: false) { [weak self] doc, _, _ in
+                guard let self else { return }
+                guard let newDoc = doc as? MarkdownDocument, newDoc !== self.mdDocument else {
+                    self.abortReplace()   // 打开失败/去重回流同一文档 → 保持现状
+                    return
+                }
+                self.replaceInFlight = false
+                newDoc.presentEditorWindow(inheritingFrame: inheritFrame)
+                self.completeClose()   // 审查已过；新窗已显示，此时关旧窗不触发“最后一窗退出”
+            }
+        }
+    }
+
+    /// 替换取消/失败：侧栏点击是乐观高亮，这里把高亮拨回当前文档
+    private func abortReplace() {
+        replaceInFlight = false
+        restoreSidebarHighlight()
+    }
+
+    private func restoreSidebarHighlight() {
+        guard let file = mdDocument?.fileURL else { return }
+        dispatchToJs("library.onRoot", ["root": file.deletingLastPathComponent().path, "current": file.path])
     }
 
     private func completeClose() {

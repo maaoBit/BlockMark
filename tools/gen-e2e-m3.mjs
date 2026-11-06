@@ -35,6 +35,23 @@ window.addEventListener("DOMContentLoaded", () => {
     r.treeFiles = files.length === 2;
     r.treeActive = files[0] && files[0].classList.contains("active");
     r.treeDir = document.querySelectorAll(".bm-tree-dir").length === 1;
+    // —— 原地换文档轮：普通点击/⌘点击的桥参数 + 高亮乐观更新与拨回 ——
+    // 点击会整体重渲染树（innerHTML 重建），每步后须重新取节点
+    const sent = [];
+    window.webkit = { messageHandlers: { bridge: { postMessage: m => sent.push(m) } } };
+    const qf = p => document.querySelector('.bm-tree-file[data-file="' + p + '"]');
+    qf("/tmp/x/b.md").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    r.clickSendsOpenFile = sent.length === 1 && sent[0].name === "library.openFile" &&
+      sent[0].data.path === "/tmp/x/b.md" && sent[0].data.newWindow === false;
+    r.clickMovesActive = qf("/tmp/x/b.md").classList.contains("active");
+    qf("/tmp/x/b.md").dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+    r.metaClickNewWindow = sent[1] && sent[1].name === "library.openFile" &&
+      sent[1].data.path === "/tmp/x/b.md" && sent[1].data.newWindow === true;
+    // 原生取消替换时回推 onRoot → 高亮拨回当前文档
+    Bridge.dispatch("library.onRoot", { root: "/tmp/x", current: "/tmp/x/a.md" });
+    r.onRootRestoresActive = qf("/tmp/x/a.md").classList.contains("active") &&
+      !qf("/tmp/x/b.md").classList.contains("active");
+    delete window.webkit;
     // 搜索结果回推
     Bridge.dispatch("globalSearch.onResults", { results: [
       { path: "/tmp/x/a.md", name: "a.md", line: 3, text: "含 Keyword 的行" },
@@ -84,6 +101,7 @@ window.addEventListener("DOMContentLoaded", () => {
     document.body.appendChild(pre);
     const ok = r.hasSidebar && r.hasSearchInput && r.sidebarShown && r.treeHint && r.outlineCount &&
                r.outlineIndent && r.treeFiles && r.treeActive && r.treeDir && r.searchHit && r.searchMark &&
+               r.clickSendsOpenFile && r.clickMovesActive && r.metaClickNewWindow && r.onRootRestoresActive &&
                r.outlineTargetOk && r.detachShown && r.detachOutlineInRight && r.detachLeftKeepsFiles &&
                r.detachLeftTabs && r.detachRightTabs && r.searchFollowsFiles && r.rightWidthSet &&
                r.widthClamped && r.leftWidthDragged && r.dropHintOnLeft && r.mergeBack;
