@@ -22,7 +22,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     block(cid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await sleep(30);
     const ov = document.getElementById("bm-table-zoom");
-    r.zoomOpen = !!ov && ov.classList.contains("show");
+    r.zoomOpen = !!ov && ov.classList.contains("show") && getComputedStyle(ov).display === "flex";
     r.zoomCells = ov && ov.querySelectorAll("td,th").length === 12;   // 4列×(1头+2体)
     r.zoomReadOnly = ov && [...ov.querySelectorAll("td,th")].every(c => !c.isContentEditable);
     r.zoomSticky = ov && !!ov.querySelector("th");
@@ -31,13 +31,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     // 4) Esc 关（捕获层拦截，不误触块编辑）
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(20);
-    r.escClose = !ov.classList.contains("show");
+    r.escClose = !ov.classList.contains("show") && getComputedStyle(ov).display === "none";
     // 5) 背景点击关
     block(cid).querySelector(".bm-table-zoom-btn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await sleep(20);
     document.getElementById("bm-table-zoom").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await sleep(20);
-    r.backdropClose = !document.getElementById("bm-table-zoom").classList.contains("show");
+    r.backdropClose = !document.getElementById("bm-table-zoom").classList.contains("show") && getComputedStyle(document.getElementById("bm-table-zoom")).display === "none";
     // 6) 宽表自适配：长文本单元格折行，无横向溢出（大视图目标=一页看完）
     Editor.open("| 列一 | 列二 |\\n|---|---|\\n| 这是一段非常长的单元格文本用来验证放大视图里会自动折行而不是横向撑开表格导致需要左右滑动查看 " +
       "https://example.com/a/very/long/path/that/should/wrap/inside/the/cell/without/horizontal/scroll | 短 |\\n");
@@ -121,10 +121,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
     ov4.querySelector(".bm-zoom-reset").dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await sleep(20);
-    r.resetKeepsOpen = ov4.classList.contains("show") && ths4.every(t => t.style.width === "");
+    r.resetKeepsOpen = ov4.classList.contains("show") && getComputedStyle(ov4).display === "flex" && ths4.every(t => t.style.width === "");
     ov4.querySelector(".bm-zoom-close").dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await sleep(20);
-    r.closeBtnWorks = !ov4.classList.contains("show");
+    r.closeBtnWorks = !ov4.classList.contains("show") && getComputedStyle(ov4).display === "none";
 
     // 9) 卡片整体缩放：se 斜拉宽高同变、e/s 单轴、表格跟随重排且零横滚、重开重置
     Editor.open("| A | B |\\n|---|---|\\n| 1 | 2 |\\n");
@@ -181,7 +181,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     r.menuItem = !!(cap && (cap.items || []).some(i => i.cmd === "table.preview"));
     Bridge.dispatch("menu.onCommand", { cmd: "table.preview", cid });
     await sleep(20);
-    r.cmdOpen = document.getElementById("bm-table-zoom").classList.contains("show");
+    r.cmdOpen = document.getElementById("bm-table-zoom").classList.contains("show") && getComputedStyle(document.getElementById("bm-table-zoom")).display === "flex";
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(20);
 

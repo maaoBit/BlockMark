@@ -11,6 +11,8 @@
   --border: #e4e7eb;
   --font-ui: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
   --font-mono: "SF Mono", Menlo, Consolas, monospace;
+  /* 正文字号（用户可调：捏合/⌘+−/设置窗口，原生经 ui.prefs 桥以 inline 样式覆盖） */
+  --font-size-base: 16px;
   /* 主题色（可被主题 CSS 覆盖） */
   --edit-bg: #fffce8;
   --edit-border: #e8d78a;
@@ -43,7 +45,7 @@ body {
   margin: 0 auto;
   padding: 56px 40px 120px;
   outline: none;
-  font-size: 16px;
+  font-size: var(--font-size-base, 16px);   /* 全局字号杠杆：块内标题/代码/表格均 em 相对它 */
   line-height: 1.8;
 }
 
@@ -98,7 +100,7 @@ body {
 .bm-cm-hint { opacity: .55; }
 .bm-cm-host .CodeMirror {
   height: auto; border: 1px solid var(--border); border-radius: 8px;
-  font-family: var(--font-mono); font-size: 13px; line-height: 1.55;
+  font-family: var(--font-mono); font-size: calc(var(--font-size-base, 16px) * 0.8125); line-height: 1.55;
   background: var(--code-bg); color: var(--fg);
 }
 .bm-cm-host .CodeMirror-scroll { min-height: 60px; }
@@ -108,7 +110,7 @@ body {
 #bm-source-cm { flex: 1; min-height: 0; padding: 24px 16px 64px; }
 #bm-source-cm .CodeMirror {
   height: 100%; border: none; font-family: var(--font-mono);
-  font-size: 14px; line-height: 1.7; background: var(--bg);
+  font-size: calc(var(--font-size-base, 16px) * 0.875); line-height: 1.7; background: var(--bg);
 }
 
 /* M4: 通知 toast */
@@ -164,7 +166,7 @@ tbody tr:nth-child(even) { background: var(--row-alt); }
 .bm-source {
   flex: 1; width: 100%; max-width: 900px; margin: 0 auto;
   padding: 48px 32px 96px; border: none; outline: none; resize: none;
-  font-family: var(--font-mono); font-size: 14px; line-height: 1.7;
+  font-family: var(--font-mono); font-size: calc(var(--font-size-base, 16px) * 0.875); line-height: 1.7;
   color: var(--fg); background: var(--bg);
 }
 
@@ -185,7 +187,7 @@ tbody tr:nth-child(even) { background: var(--row-alt); }
   border-left: 3px solid var(--fg-dim);
   background: var(--bg-dim);
   padding: 10px 14px; border-radius: 4px;
-  font-family: var(--font-mono); font-size: 13px;
+  font-family: var(--font-mono); font-size: calc(var(--font-size-base, 16px) * 0.8125);
 }
 
 .bm-math { text-align: center; overflow-x: auto; padding: 4px 0; }
@@ -193,7 +195,7 @@ tbody tr:nth-child(even) { background: var(--row-alt); }
 .bm-math-error { color: var(--err); }
 
 .bm-footnote { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 8px; }
-.bm-fndef { font-size: 13px; color: var(--fg-dim); padding: 2px 0; }
+.bm-fndef { font-size: calc(var(--font-size-base, 16px) * 0.8125); color: var(--fg-dim); padding: 2px 0; }
 .bm-fn-label {
   font-size: 11px; color: var(--fg-faint); border: 1px solid var(--border);
   border-radius: 3px; padding: 0 4px; margin-right: 6px; cursor: pointer;
@@ -216,8 +218,10 @@ tbody tr:nth-child(even) { background: var(--row-alt); }
 .bm-task.bm-task-done > .bm-task-box { background: var(--link); border-color: var(--link); color: #fff; }
 .bm-task.bm-task-done { color: var(--fg-faint); text-decoration: line-through; text-decoration-color: var(--fg-faint); }
 
-.bm-mermaid { text-align: center; padding: 8px 0; overflow-x: auto; }
-.bm-mermaid svg { max-width: 100%; }
+/* mermaid：inline max-width 由 JS 渲染后剥掉（mermaid v9 自带，CSS 覆盖不了），
+   宽图按自然宽度在文档内横滚，不再被压扁 */
+.bm-mermaid { text-align: center; padding: 8px 0; overflow-x: auto; position: relative; }
+.bm-mermaid svg { max-width: none; }
 .bm-mermaid-error { color: var(--err); }
 
 /* ---------- M3：侧栏（文件树 + 大纲 + 全局搜索） ---------- */
@@ -506,3 +510,79 @@ td.bm-cell-editing, th.bm-cell-editing {
 .bm-zoom-winhandle.se:hover { border-color: transparent; }
 .bm-zoom-winhandle:hover { background: var(--block-hover); }
 .bm-zoom-winhandle.se:hover::after { border-right-color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ---------- M11：mermaid 放大查看器（hover 按钮 + 全屏浮层：拖拽平移 + 滚轮/捏合缩放） ---------- */
+
+.bm-mermaid-zoom-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 5;
+  display: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 1px 4px var(--shadow);
+}
+.bm-mermaid:hover .bm-mermaid-zoom-btn { display: block; }
+.bm-mermaid-zoom-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+#bm-mermaid-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 430;   /* 压过表格大视图(420) */
+  display: none;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.82);
+}
+#bm-mermaid-zoom.show { display: flex; }
+.bm-mzoom-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #d1d5db;
+  background: rgba(255, 255, 255, 0.06);
+  user-select: none;
+  flex: none;
+}
+.bm-mzoom-title { margin-right: auto; font-weight: 600; color: #f9fafb; }
+.bm-mzoom-hint { opacity: 0.55; }
+.bm-mzoom-bar button {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: #d1d5db;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.bm-mzoom-bar button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.bm-mzoom-pct {
+  min-width: 44px;
+  text-align: center;
+  color: #f9fafb;
+  font-variant-numeric: tabular-nums;
+}
+.bm-mzoom-stage {
+  flex: 1;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;   /* 拖拽/捏合交给自己处理，不给浏览器手势 */
+}
+.bm-mzoom-stage.bm-mzoom-panning { cursor: grabbing; }
+.bm-mzoom-canvas { transform-origin: 0 0; will-change: transform; }
+.bm-mzoom-canvas svg {
+  display: block;
+  max-width: none;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}

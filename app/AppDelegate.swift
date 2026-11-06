@@ -87,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appSubMenu.addItem(withTitle: "检查更新…", action: #selector(Updater.checkNow), keyEquivalent: "")
             .target = Updater.shared // 单例不在响应链上，nil-target 验证永不命中 → 必须显式绑定
         appSubMenu.addItem(.separator())
+        appSubMenu.addItem(withTitle: "设置…", action: #selector(SettingsWindowController.showSettings(_:)), keyEquivalent: ",")
+            .target = SettingsWindowController.shared   // 同上：单例须显式绑定
         appSubMenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenu.submenu = appSubMenu
         mainMenu.addItem(appMenu)
@@ -148,7 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fmtSubMenu.addItem(withTitle: "代码块", action: #selector(EditorWindowController.formatAction(_:)), keyEquivalent: "").representedObject = "code"
         fmtSubMenu.addItem(withTitle: "公式块", action: #selector(EditorWindowController.formatAction(_:)), keyEquivalent: "").representedObject = "math"
         fmtSubMenu.addItem(withTitle: "表格", action: #selector(EditorWindowController.formatAction(_:)), keyEquivalent: "t").representedObject = "table"
-        fmtSubMenu.addItem(withTitle: "分隔线", action: #selector(EditorWindowController.formatAction(_:)), keyEquivalent: "-").representedObject = "hr"
+        // 分隔线不占 ⌘-（该键让给视图→缩小：⌘- 是全平台缩小的肌肉记忆，
+        // 且格式菜单在视图之前，撞车时 ⌘- 永远命中分隔线、往文档里插 ---）
+        fmtSubMenu.addItem(withTitle: "分隔线", action: #selector(EditorWindowController.formatAction(_:)), keyEquivalent: "").representedObject = "hr"
         fmtMenu.submenu = fmtSubMenu
         mainMenu.addItem(fmtMenu)
 
@@ -161,6 +165,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         typewriter.keyEquivalentModifierMask = [.command, .option]
         let focus = viewSubMenu.addItem(withTitle: "专注模式", action: #selector(EditorWindowController.toggleFocusAction(_:)), keyEquivalent: "f")
         focus.keyEquivalentModifierMask = [.command, .option]
+        // 字号缩放（与双指捏合、设置窗口共用一条 ui.prefs 下发链；nil-target 经响应链到各窗控制器）
+        viewSubMenu.addItem(.separator())
+        viewSubMenu.addItem(withTitle: "放大", action: #selector(EditorWindowController.zoomInAction(_:)), keyEquivalent: "+")
+        viewSubMenu.addItem(withTitle: "缩小", action: #selector(EditorWindowController.zoomOutAction(_:)), keyEquivalent: "-")
+        viewSubMenu.addItem(withTitle: "实际大小", action: #selector(EditorWindowController.zoomResetAction(_:)), keyEquivalent: "0")
         // 主题子菜单：内置 themes/ + 用户 ~/Library/Application Support/BlockMark/themes/
         let themeMenu = NSMenuItem(title: "主题", action: nil, keyEquivalent: "")
         let themeSubMenu = NSMenu(title: "主题")

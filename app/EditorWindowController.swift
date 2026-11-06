@@ -34,6 +34,51 @@ final class DropView: NSView {
     }
 }
 
+// MARK: - 手势 webview（双指捏合/⌘滚轮 = 正文字号缩放；mermaid 查看器打开期间手势直推查看器）
+// WKWebView 事件缺口（Chromium e2e 测不到的接线层）：不给页面合成 gesturechange、
+// 滚轮可能被滚动树吞掉滚穿到背后文档、全屏下 Esc 被系统抢去退全屏——
+// 查看器打开期间（gestureRoutedToPage）三事件一律原生转译成桥命令。
+
+final class PinchWebView: WKWebView {
+    weak var gestureOwner: EditorWindowController?
+
+    override func magnify(with event: NSEvent) {
+        guard let owner = gestureOwner else { super.magnify(with: event); return }
+        if owner.gestureRoutedToPage {
+            owner.pushViewerZoom(1 + Double(event.magnification), event.locationInWindow)
+        } else {
+            owner.pinchFontSize(event.magnification)
+        }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard let owner = gestureOwner else { super.scrollWheel(with: event); return }
+        if owner.gestureRoutedToPage {
+            // 查看器开：滚轮=缩放图；原生消费，防滚穿到背后文档
+            let k: Double
+            if event.hasPreciseScrollingDeltas {
+                k = exp(-Double(event.scrollingDeltaY) * 0.0025)   // 触控板连续增量：平滑指数
+            } else {
+                k = event.scrollingDeltaY >= 0 ? 1 / 1.12 : 1.12   // 鼠标滚轮离散格
+            }
+            owner.pushViewerZoom(k, event.locationInWindow)
+        } else if event.modifierFlags.contains(.command) {
+            owner.cmdWheelFontSize(event.scrollingDeltaY)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // 查看器开的 Esc 在原生层先截（全屏时 WebKit 未消费的 Esc 会被系统当退出全屏）
+        if event.keyCode == 53, let owner = gestureOwner, owner.gestureRoutedToPage {
+            owner.pushJs("Editor._closeMermaidZoom()")
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
 final class EditorWindowController: NSWindowController {
 
     /// NSWindowController.document 为 assign（unsafe）：文档释放后经 wc 读它会悬垂。
@@ -46,7 +91,8 @@ final class EditorWindowController: NSWindowController {
         contentController.add(BridgeSink(controller: self), name: "bridge")
         let config = WKWebViewConfiguration()
         config.userContentController = contentController
-        let wv = WKWebView(frame: .zero, configuration: config)
+        let wv = PinchWebView(frame: .zero, configuration: config)
+        wv.gestureOwner = self
         wv.uiDelegate = self
         wv.navigationDelegate = self
         wv.autoresizingMask = [.width, .height]
@@ -85,11 +131,64 @@ final class EditorWindowController: NSWindowController {
 
     private static var pasteSeq = 0
 
+    // MARK: - 正文字号（全局唯一值：捏合/⌘滚轮/⌘+−/设置窗口共用一条 ui.prefs 下发链，UserDefaults 持久化）
+
+    static let fontSizeMin: Double = 10, fontSizeMax: Double = 32, fontSizeDefault: Double = 16
+    private static let fontSizeKey = "BlockMark.fontSize"
+
+    /// mermaid 查看器打开期间：捏合手势归还页面（ui.gestureRoute 路由，缩放图表而非字号）
+    var gestureRoutedToPage = false
+
+    static func currentFontSize() -> Double {
+        let raw = UserDefaults.standard.object(forKey: fontSizeKey) as? Double ?? fontSizeDefault
+        return min(fontSizeMax, max(fontSizeMin, raw))
+    }
+
+    static func allEditorWindowControllers() -> [EditorWindowController] {
+        NSApp.windows.compactMap { $0.windowController as? EditorWindowController }
+    }
+
+    /// 钳制 → 持久化 → 广播全部编辑器窗口 + 回填设置窗口滑杆。
+    /// quantized：手势类高频事件按 0.5px 量化；量化值不变则跳过（捏合高频去抖）。
+    static func setFontSizeAll(_ raw: Double, quantized: Bool = false) {
+        var v = min(fontSizeMax, max(fontSizeMin, raw))
+        if quantized { v = (v * 2).rounded() / 2 } else { v = v.rounded() }
+        if v == currentFontSize() { return }
+        UserDefaults.standard.set(v, forKey: fontSizeKey)
+        for wc in allEditorWindowControllers() {
+            wc.dispatchToJs("ui.prefs", ["fontSize": v])
+        }
+        SettingsWindowController.shared.syncFontSize(v)
+    }
+
+    /// 双指捏合：事件增量乘法累积（整体捏合 2 倍 ≈ 字号 2 倍）
+    @objc fileprivate func pinchFontSize(_ delta: CGFloat) {
+        Self.setFontSizeAll(Self.currentFontSize() * (1 + Double(delta)), quantized: true)
+    }
+
+    /// ⌘+双指滚动： deltaY 向上为负 → 放大
+    @objc fileprivate func cmdWheelFontSize(_ deltaY: CGFloat) {
+        Self.setFontSizeAll(Self.currentFontSize() - Double(deltaY) * 0.12, quantized: true)
+    }
+
+    /// 查看器手势直推：窗口坐标 → 视口 CSS 坐标（WKWebView 顶左原点，翻 y）
+    func pushViewerZoom(_ k: Double, _ locationInWindow: NSPoint) {
+        let p = webView.convert(locationInWindow, from: nil)
+        dispatchToJs("viewer.zoom", ["k": k, "x": p.x, "y": webView.bounds.height - p.y])
+    }
+
+    @objc func zoomInAction(_ sender: Any?) { Self.setFontSizeAll(Self.currentFontSize() + 1) }
+    @objc func zoomOutAction(_ sender: Any?) { Self.setFontSizeAll(Self.currentFontSize() - 1) }
+    @objc func zoomResetAction(_ sender: Any?) { Self.setFontSizeAll(Self.fontSizeDefault) }
+
     // MARK: - 桥：JS → 原生（异步消息）
 
     fileprivate func handleBridgeMessage(_ name: String, _ data: [String: Any]) {
         switch name {
         case "editor.ready":
+            // 页面重载（WebContent 崩溃后自动恢复）后 JS 状态归零：手势路由必须复位，
+            // 否则滚轮被原生截走推给不存在的查看器 → 文档滚不动、捏合不缩放
+            gestureRoutedToPage = false
             if let md = mdDocument?.markdown, !md.isEmpty { sendMarkdown(md) }
             if let dir = mdDocument?.fileURL?.deletingLastPathComponent() {
                 // 图片相对路径基准（file URL string 已编码，含中文/空格安全）
@@ -100,6 +199,7 @@ final class EditorWindowController: NSWindowController {
             }
             let savedTheme = UserDefaults.standard.string(forKey: "BlockMark.theme") ?? "default"
             applyTheme(savedTheme)
+            dispatchToJs("ui.prefs", ["fontSize": Self.currentFontSize()])
         case "document.syncContent":
             if let content = data["content"] as? String { mdDocument?.contentDidChange(content) }
         case "document.updateChangeCount":
@@ -126,6 +226,9 @@ final class EditorWindowController: NSWindowController {
             handleGlobalSearch(data)
         case "menu.showContext":
             handleContextMenu(data)
+        case "ui.gestureRoute":
+            // mermaid 查看器开/关：捏合手势在"缩放图表"与"缩放字号"间切换归属
+            gestureRoutedToPage = (data["route"] as? String == "viewer")
         case "logger.debug":
             NSLog("[BlockMark JS] %@", String(describing: data))
         default:
@@ -305,6 +408,8 @@ final class EditorWindowController: NSWindowController {
             var payload: [String: Any] = ["cmd": cmd, "cid": ctxCid]
             if ctxTr >= 0 && ctxTc >= 0 { payload["tr"] = ctxTr; payload["tc"] = ctxTc }
             dispatchToJs("menu.onCommand", payload)
+        case "mermaid.preview":
+            dispatchToJs("menu.onCommand", ["cmd": "mermaid.preview", "cid": ctxCid])
         default:
             break
         }
@@ -678,7 +783,7 @@ final class EditorWindowController: NSWindowController {
             self.webView.evaluateJavaScript("Editor.getExportHtml()") { result, _ in
                 guard let html = result as? String else { return }
                 let name = (self.mdDocument?.displayName ?? "未标记") + ".html"
-                let inlined = Self.inlineExportCss(html)
+                let inlined = Self.setExportFontSize(Self.inlineExportCss(html), px: Self.currentFontSize())
                 self.writePanel(defaultName: name) { url in
                     if let d = inlined.data(using: .utf8) {
                         do { try d.write(to: url) } catch { self.toast("导出失败：\(error.localizedDescription)") }
@@ -705,6 +810,13 @@ final class EditorWindowController: NSWindowController {
             out.replaceSubrange(full, with: "<style>\n\(css)\n</style>")
         }
         return out
+    }
+
+    /// 导出 HTML 内联当前字号（离开 app 后 :root 变量不再有原生 ui.prefs 通道下发）
+    private static func setExportFontSize(_ html: String, px: Double) -> String {
+        guard let headRange = html.range(of: "</head>") else { return html }
+        return html.replacingCharacters(in: headRange,
+                                        with: "<style>:root{--font-size-base:\(px)px}</style></head>")
     }
 
     @objc func exportPDF(_ sender: Any?) {

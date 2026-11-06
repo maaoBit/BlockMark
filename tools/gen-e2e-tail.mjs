@@ -14,7 +14,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     Editor.open("标题甲\n\n段落甲含目标词一\n\n段落乙含目标词二\n\n## 甲节尾\n");
     Editor.openFindBar("目标词");
     await sleep(30);
-    r.findShown = !!document.querySelector("#bm-findbar.show");
+    r.findShown = !!document.querySelector("#bm-findbar.show") && getComputedStyle(document.querySelector("#bm-findbar")).display !== "none";
     r.findHits = document.querySelectorAll("mark.bm-hit").length === 2;
     r.findCur = document.querySelectorAll("mark.bm-hit-cur").length === 1;
     r.findCount = document.querySelector("#bm-findbar .bm-find-count").textContent === "1/2";
@@ -24,7 +24,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     r.findNext = document.querySelector("#bm-findbar .bm-find-count").textContent === "2/2";
     // 关闭恢复
     Editor.closeFindBar();
-    r.findClosed = !document.querySelector("#bm-findbar.show") && !document.querySelector("mark.bm-hit");
+    r.findClosed = !document.querySelector("#bm-findbar.show") && !document.querySelector("mark.bm-hit") && getComputedStyle(document.querySelector("#bm-findbar")).display === "none";
     // 关键词改查含多匹配行内场景
     Editor.openFindBar("甲");
     await sleep(30);
@@ -36,6 +36,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const tCid = Editor._editingState() && document.querySelector('[data-type="table"]').dataset.cid;
     Editor._enterCellEdit(tCid, 1, 0);
     r.cellSource = document.querySelector('[data-r="1"][data-c="0"]').textContent === "a1"; // 显示源码
+    r.navSelectAll = !getSelection().isCollapsed;   // 无坐标导航进入（Tab/Enter 前置）=全选，输入即替换
     const td = document.querySelector('[data-r="1"][data-c="0"].bm-cell-editing');
     td.textContent = "改过";
     // Tab → 右格
@@ -76,6 +77,27 @@ window.addEventListener("DOMContentLoaded", async () => {
     await sleep(30);
     r.dblWriteback = Editor.getMarkdown().includes("| 双击改 | a2 |");
 
+    // ---------- 点击落光标回归：点击进入=光标落点击处（非全选）；点编辑中的同格不再重进全选 ----------
+    Editor.open("| A | B |\n|---|---|\n| 这是一段比较长的单元格内容用来验证点击落光标的位置 | a2 |\n");
+    const cCid = document.querySelector('[data-type="table"]').dataset.cid;
+    const cTd = document.querySelector('[data-cid="' + cCid + '"] [data-r="1"][data-c="0"]');
+    const cRect = cTd.getBoundingClientRect();
+    const cy2 = Math.round(cRect.top + cRect.height / 2);
+    cTd.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: Math.round(cRect.left + cRect.width * 0.6), clientY: cy2 }));
+    await sleep(30);
+    const sel1 = getSelection();
+    const cText = cTd.textContent;
+    const off1 = sel1.isCollapsed && cTd.contains(sel1.anchorNode) ? sel1.anchorOffset : -1;
+    r.clickCaretMid = off1 > 0 && off1 < cText.length;   // 光标在格内文本中间（非全选、非恒定起点）
+    // 同格再点另一处：不重进（旧代码会再全选），选择态保持
+    cTd.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: Math.round(cRect.left + 5), clientY: cy2 }));
+    await sleep(20);
+    const sel2 = getSelection();
+    r.sameCellNoReenter = sel2.isCollapsed && sel2.anchorOffset === off1 &&
+                          cTd.classList.contains("bm-cell-editing") && cTd.textContent === cText;
+    cTd.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await sleep(20);
+
     // ---------- URL 智能粘贴 ----------
     Editor.open("看看 站点 词\n");
     const cid = document.querySelector('[data-type="paragraph"]').dataset.cid;
@@ -111,9 +133,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     const img = document.querySelector('[data-type="paragraph"] img');
     r.imgExists = !!img;
     img.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    r.lightbox = !!document.querySelector("#bm-lightbox.show");
+    r.lightbox = !!document.querySelector("#bm-lightbox.show") && getComputedStyle(document.querySelector("#bm-lightbox")).display !== "none";
     document.querySelector("#bm-lightbox").dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    r.lightboxClosed = !document.querySelector("#bm-lightbox.show");
+    r.lightboxClosed = !document.querySelector("#bm-lightbox.show") && getComputedStyle(document.querySelector("#bm-lightbox")).display === "none";
 
     // ---------- 图片相对路径 base ----------
     Editor._assetBase("file:///Users/x/docdir/");

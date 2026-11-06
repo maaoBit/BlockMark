@@ -12,7 +12,7 @@ echo "== swiftc =="
 # 低于该版本的系统 LaunchServices 报 kLSIncompatibleSystemVersionErr(-10825) 拒启
 swiftc -O -target arm64-apple-macos13.0 \
   -o "$APP/Contents/MacOS/BlockMark" \
-  app/main.swift app/AppDelegate.swift app/Document.swift app/DocumentFileWatcher.swift app/EditorWindowController.swift app/Updater.swift \
+  app/main.swift app/AppDelegate.swift app/Document.swift app/DocumentFileWatcher.swift app/EditorWindowController.swift app/SettingsWindowController.swift app/Updater.swift \
   -framework Cocoa -framework WebKit
 
 echo "== bundle editor (WKWebView file:// 不支持 ES module 导入) =="

@@ -5,7 +5,7 @@
 //     光标落在语法结构内时加亮 —— M1 行内就地编辑）
 //   - 代码块编辑态内嵌 CodeMirror（M2），渲染态 runMode 语法高亮
 //   - 事实源是块对象的 source 字段，DOM 由它派生
-import { parseBlocks, serializeBlocks, reclassify, classifyBlock, mathTex, toggleTaskItem, tableGetCell, tableSetCell, tableParse, tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol } from "./parser.js";
+import { parseBlocks, serializeBlocks, reclassify, classifyBlock, mathTex, toggleTaskItem, tableGetCell, tableSetCell, tableParse, tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol, svgNaturalSize } from "./parser.js";
 import { renderInline, renderTable, escapeHtml, highlightEditableSource } from "./inline.js";
 import "./bridge.js";   // 副作用导入：注册 window.Bridge（module 调试路径此前因缺它整体瘫痪）
 
@@ -181,6 +181,16 @@ function enhanceTables() {
 // 渲染态代码块：CodeMirror.runMode 语法高亮（无 CM 时保持纯文本）
 let mmdSeq = 0;
 
+// mermaid svg 钉自然尺寸：解析数学在 parser.js 的 svgNaturalSize（有单测），这里只做 DOM 落地
+function sizeMermaidSvg(svg) {
+  const { w, h } = svgNaturalSize(svg.getAttribute("viewBox"),
+                                  svg.getAttribute("width"), svg.getAttribute("height"));
+  svg.style.maxWidth = "none";
+  if (w > 0) svg.setAttribute("width", w);
+  if (h > 0) svg.setAttribute("height", h);
+  return { w, h };
+}
+
 function enhanceCodeBlocks() {
   if (!window.CodeMirror || !CodeMirror.runMode) return;
   for (const pre of write().querySelectorAll("pre.bm-code:not([data-enhanced])")) {
@@ -195,6 +205,16 @@ function enhanceCodeBlocks() {
         const wrap = document.createElement("div");
         wrap.className = "bm-mermaid";
         wrap.innerHTML = svg;
+        // mermaid v9 的 svg 带 inline max-width + width="100%"：前者把宽图压扁（CSS 覆盖不了
+        // inline），后者把窄图拉满容器。两者都剥掉，按 viewBox 钉死自然尺寸——宽图横滚，窄图不虚胖
+        const s = wrap.querySelector("svg");
+        if (s) sizeMermaidSvg(s);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "bm-mermaid-zoom-btn";
+        btn.title = "放大查看图表";
+        btn.textContent = "\u26F6 \u653E\u5927";
+        wrap.appendChild(btn);   // 只进活 DOM（导出走 blockHtml 重渲，不含按钮；同表格按钮）
         pre.replaceWith(wrap);
       }).catch(() => { pre.classList.add("bm-mermaid-error"); });
       continue;
@@ -289,6 +309,7 @@ function updateMarksActive() {
 function findBlock(cid) { return blocks.find(b => b.cid === cid); }
 
 function enterEdit(cid, atEnd = true) {
+  cancelMmdEditTimer();   // 用户改点他处进编辑：单击 mermaid 的 280ms 延时不得再 fire 劫持焦点
   let b = findBlock(cid);
   if (!b) return;
   lastFocusedCid = cid;
@@ -448,6 +469,7 @@ function pushHistory(frozen) {
 function restore(snap) {
   cellEditing = null;
   editingCm = null;
+  cancelMmdEditTimer();   // undo/redo 重置世界：悬着的 mermaid 延时进编辑不得落进恢复后的文档
   blocks = JSON.parse(snap);
   renderAll();
   editingCid = null;
@@ -621,8 +643,9 @@ function flashJump(el) {
 
 let cellEditing = null; // {cid, td}
 
-function enterCellEdit(blockEl, td) {
+function enterCellEdit(blockEl, td, at) {
   if (!td) return;
+  cancelMmdEditTimer();   // 改点进格编辑：mermaid 延时器作废（同 enterEdit）
   if (cellEditing) commitCellEdit();   // 先提交上一格；其重渲染会替换整块 DOM
   // 上一步 rerenderBlock 后入参 td 可能已脱离 DOM（双击/直接点另一格）：按 r/c 重新解析
   const r = td.dataset.r, c = td.dataset.c;
@@ -634,11 +657,23 @@ function enterCellEdit(blockEl, td) {
   td.textContent = src;                    // 显示该格源码（与整块编辑模型一致）
   td.classList.add("bm-cell-editing");
   td.focus();
-  const range = document.createRange();
-  range.selectNodeContents(td);
   const sel = getSelection();
   sel.removeAllRanges();
-  sel.addRange(range);                      // 全选：输入即替换
+  // 点击进入（at=坐标）：光标落在点击处——preventDefault 已吞掉原生落点，这里按坐标重算
+  let placed = false;
+  if (at && document.caretRangeFromPoint) {
+    const pos = document.caretRangeFromPoint(at.x, at.y);
+    if (pos && td.contains(pos.startContainer)) {
+      pos.collapse(true);
+      sel.addRange(pos);
+      placed = true;
+    }
+  }
+  if (!placed) {
+    const range = document.createRange();
+    range.selectNodeContents(td);
+    sel.addRange(range);                    // 无坐标（Tab/Enter 导航/菜单聚焦）：全选，输入即替换
+  }
   cellEditing = { cid: b.cid, td };
 }
 
@@ -1029,6 +1064,169 @@ function closeTableZoom() {
   document.getElementById("bm-table-zoom")?.classList.remove("show");
 }
 
+// ---------- mermaid 放大查看器（全屏浮层：拖拽平移 + 滚轮/双指捏合缩放） ----------
+// 捏合手势归属：打开时经 ui.gestureRoute 通知原生把 magnify 事件转发给页面
+// （WebKit 转成 gesturechange，本浮层接管缩放图表）；关闭后归还编辑器（捏合=正文字号）。
+// 进入：hover 按钮 / 右键"放大查看图表" / 双击图；单击图仍进源码编辑（延时判定）。
+
+const MZ_MIN = 0.15, MZ_MAX = 8;
+let mz = null;            // { canvas, stage, pct, w, h, s, tx, ty }
+let mmdEditTimer = 0;     // 单击 mermaid 的延时进编辑（给双击留 280ms 判定窗）
+
+// 延时器作废：任何"用户改点他处/世界重置"路径都要调（enterEdit/enterCellEdit/restore/
+// openMarkdown/查看器打开），否则 280ms 后焦点被劫进图表源码 CM（评审轮 P2）
+function cancelMmdEditTimer() { clearTimeout(mmdEditTimer); mmdEditTimer = 0; }
+
+function openMermaidZoom(cid) {
+  cancelMmdEditTimer();
+  commitEditing();   // 块若在编辑态先落盘最新源码（编辑态 DOM 无 svg，重渲后再进）
+  const b = findBlock(cid);
+  const blockEl = write().querySelector(`[data-cid="${CSS.escape(cid)}"]`);
+  const srcSvg = blockEl && blockEl.querySelector(".bm-mermaid svg");
+  if (!b || b.type !== "code" || (b.lang || "").toLowerCase() !== "mermaid" || !srcSvg) {
+    return;   // 刚提交的编辑还在异步 mermaid 渲染中：本次不开，svg 就绪后再点即进
+  }
+  let ov = document.getElementById("bm-mermaid-zoom");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "bm-mermaid-zoom";
+    ov.innerHTML = `<div class="bm-mzoom-bar">` +
+      `<span class="bm-mzoom-title">图表预览</span>` +
+      `<button type="button" class="bm-mzoom-out" title="缩小">−</button>` +
+      `<span class="bm-mzoom-pct">100%</span>` +
+      `<button type="button" class="bm-mzoom-in" title="放大">＋</button>` +
+      `<button type="button" class="bm-mzoom-fit" title="缩放到适合屏幕">适合</button>` +
+      `<button type="button" class="bm-mzoom-full" title="恢复原始大小">100%</button>` +
+      `<span class="bm-mzoom-hint">拖拽平移 · 滚轮/双指缩放 · Esc 关闭</span>` +
+      `<button type="button" class="bm-mzoom-close" title="关闭">\u2715</button></div>` +
+      `<div class="bm-mzoom-stage"><div class="bm-mzoom-canvas"></div></div>`;
+    document.body.appendChild(ov);
+    ov.querySelector(".bm-mzoom-close").addEventListener("click", closeMermaidZoom);
+    ov.querySelector(".bm-mzoom-in").addEventListener("click", () => mzZoomCenter(1.25));
+    ov.querySelector(".bm-mzoom-out").addEventListener("click", () => mzZoomCenter(0.8));
+    ov.querySelector(".bm-mzoom-fit").addEventListener("click", () => mzFit());
+    ov.querySelector(".bm-mzoom-full").addEventListener("click", () => mzSetScale(1));
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && document.getElementById("bm-mermaid-zoom")?.classList.contains("show")) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMermaidZoom();
+      }
+    }, true);   // 捕获阶段抢在块编辑 Esc 之前（同表格大视图）
+    mzWireStage(ov);
+  }
+  // 克隆自然尺寸 SVG：sizeMermaidSvg 统一按 viewBox 钉死 width/height（防 "100%" 误读）
+  const stage = ov.querySelector(".bm-mzoom-stage");
+  const canvas = ov.querySelector(".bm-mzoom-canvas");
+  const c = srcSvg.cloneNode(true);
+  const size = sizeMermaidSvg(c);
+  canvas.innerHTML = "";
+  canvas.appendChild(c);
+  ov.classList.add("show");   // 先显示再量尺寸（display:none 下 clientWidth 恒 0）
+  mz = { canvas, stage, pct: ov.querySelector(".bm-mzoom-pct"), w: size.w, h: size.h, s: 1, tx: 0, ty: 0 };
+  mzFit();
+  Bridge.call("ui.gestureRoute", { route: "viewer" });   // 捏合交给本浮层（原生不再当字号手势）
+}
+
+function closeMermaidZoom() {
+  const ov = document.getElementById("bm-mermaid-zoom");
+  if (!ov || !ov.classList.contains("show")) return;
+  ov.classList.remove("show");
+  mz = null;
+  Bridge.call("ui.gestureRoute", { route: "editor" });   // 捏合归还编辑器（字号缩放）
+}
+
+function mzApply() {
+  if (!mz) return;
+  mz.canvas.style.transform = `translate(${mz.tx}px, ${mz.ty}px) scale(${mz.s})`;
+  mz.pct.textContent = Math.round(mz.s * 100) + "%";
+}
+
+// 缩放并保持 stage 中心不动（按钮/重置用）
+function mzSetScale(s2) {
+  if (!mz) return;
+  mzZoomAt(mz.stage.clientWidth / 2, mz.stage.clientHeight / 2, s2 / mz.s);
+}
+
+// 适配屏幕（小图保持 100% 自然大小），居中
+function mzFit() {
+  if (!mz) return;
+  const s = Math.min((mz.stage.clientWidth - 48) / mz.w, (mz.stage.clientHeight - 48) / mz.h, 1);
+  mz.s = s;
+  mz.tx = (mz.stage.clientWidth - mz.w * s) / 2;
+  mz.ty = (mz.stage.clientHeight - mz.h * s) / 2;
+  mzApply();
+}
+
+// 以 stage 内 (cx, cy) 为锚缩放 k 倍（光标/手势中心不动）
+function mzZoomAt(cx, cy, k) {
+  if (!mz) return;
+  const s2 = Math.min(Math.max(mz.s * k, MZ_MIN), MZ_MAX);
+  const kk = s2 / mz.s;
+  mz.tx = cx - (cx - mz.tx) * kk;
+  mz.ty = cy - (cy - mz.ty) * kk;
+  mz.s = s2;
+  mzApply();
+}
+
+function mzZoomCenter(k) {
+  if (mz) mzZoomAt(mz.stage.clientWidth / 2, mz.stage.clientHeight / 2, k);
+}
+
+// 舞台接线：拖拽平移（window 级 move/up 分发，同表格大视图模型）+ 滚轮/捏合缩放 + 空白单击关闭
+function mzWireStage(ov) {
+  const stage = ov.querySelector(".bm-mzoom-stage");
+  let drag = null;
+  stage.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || !mz) return;
+    e.preventDefault();   // 阻止拖拽中选中文本
+    stage.classList.add("bm-mzoom-panning");
+    drag = { x: e.clientX, y: e.clientY, tx: mz.tx, ty: mz.ty, moved: false, onStage: e.target === stage };
+  });
+  window.addEventListener("pointermove", ev => {
+    if (!drag || !mz) return;
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    mz.tx = drag.tx + dx;
+    mz.ty = drag.ty + dy;
+    mzApply();
+  });
+  window.addEventListener("pointerup", () => {
+    if (!drag) return;
+    stage.classList.remove("bm-mzoom-panning");
+    // 空白处原地点击（未拖动）= 关闭，同 lightbox 直觉
+    if (!drag.moved && drag.onStage) closeMermaidZoom();
+    drag = null;
+  });
+  window.addEventListener("pointercancel", () => {
+    if (drag) { stage.classList.remove("bm-mzoom-panning"); drag = null; }
+  });
+  stage.addEventListener("wheel", e => {
+    if (!mz) return;
+    e.preventDefault();
+    const rect = stage.getBoundingClientRect();
+    mzZoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+  }, { passive: false });
+  // Safari/WebKit 双指捏合（原生转发 magnify 后才触达；路由见 ui.gestureRoute）
+  let pinch0 = 1;
+  stage.addEventListener("gesturestart", e => { e.preventDefault(); pinch0 = mz ? mz.s : 1; });
+  stage.addEventListener("gesturechange", e => {
+    if (!mz) return;
+    e.preventDefault();
+    const rect = stage.getBoundingClientRect();
+    mzZoomAt(e.clientX - rect.left, e.clientY - rect.top, (e.scale * pinch0) / mz.s);
+  });
+  stage.addEventListener("gestureend", e => e.preventDefault());
+}
+
+// 原生 → JS：查看器缩放直推（WKWebView 不给页面合成 gesturechange，滚轮也可能被
+// 滚动树吞掉——原生层把捏合/滚轮增量转成桥命令；x/y 为视口 CSS 坐标）
+Bridge.register("viewer.zoom", d => {
+  if (!mz) return;
+  const rect = mz.stage.getBoundingClientRect();
+  mzZoomAt((+d.x || 0) - rect.left, (+d.y || 0) - rect.top, +d.k || 1);
+});
+
 // ---------- 图片预览（lightbox） ----------
 
 function openLightbox(src) {
@@ -1072,6 +1270,27 @@ function bindEvents() {
       const blockEl = e.target.closest(".bm-block");
       if (blockEl) openTableZoom(blockEl.dataset.cid);
       return;
+    }
+    if (e.target.closest && e.target.closest(".bm-mermaid-zoom-btn")) {
+      e.preventDefault();
+      const blockEl = e.target.closest(".bm-block");
+      if (blockEl) openMermaidZoom(blockEl.dataset.cid);
+      return;
+    }
+    // mermaid 图：双击=开查看器；单击=延时进源码编辑（留 280ms 给双击判定）
+    const mmd = e.target.closest && e.target.closest(".bm-mermaid");
+    if (mmd) {
+      const blockEl = e.target.closest(".bm-block");
+      if (blockEl && blockEl.dataset.cid !== editingCid) {
+        e.preventDefault();
+        cancelMmdEditTimer();
+        if (e.detail >= 2) {
+          openMermaidZoom(blockEl.dataset.cid);
+        } else {
+          mmdEditTimer = setTimeout(() => { mmdEditTimer = 0; enterEdit(blockEl.dataset.cid); }, 280);
+        }
+        return;
+      }
     }
     const blockEl = e.target.closest(".bm-block");
     if (!blockEl) return;
@@ -1120,8 +1339,9 @@ function bindEvents() {
     // 表格单元格就地编辑（不进整块编辑态）
     const td = e.target.closest("td[data-r], th[data-r]");
     if (td && blockEl.dataset.cid !== editingCid) {
+      if (cellEditing && cellEditing.td === td) return;   // 已在编辑此格：交原生（点击定位/双击选词/拖选）
       e.preventDefault();
-      enterCellEdit(blockEl, td);
+      enterCellEdit(blockEl, td, { x: e.clientX, y: e.clientY });
       return;
     }
     if (blockEl.dataset.cid !== editingCid) {
@@ -1432,6 +1652,10 @@ function bindEvents() {
       if (cols > 1) items.push({ cmd: "table.deleteCol", label: "删除此列" });
       items.push({ sep: true }, { cmd: "table.preview", label: "放大查看表格" }, { cmd: "table.deleteTable", label: "删除表格" });
     }
+    // mermaid 图：右键放大查看
+    if (e.target.closest(".bm-mermaid")) {
+      items.push({ sep: true }, { cmd: "mermaid.preview", label: "放大查看图表" });
+    }
     const payload = {
       items,
       link: a ? (a.getAttribute("href") || "") : "",
@@ -1603,7 +1827,9 @@ function scheduleSourcePush() {
 function openMarkdown(md, resetHistory = true) {
   cellEditing = null;      // 悬空 td/cm 会把旧文档内容写进新文档同 cid 块
   editingCm = null;
-  closeTableZoom();        // 换文档关掉旧文档的浮层（放大表格/图片预览）
+  closeTableZoom();        // 换文档关掉旧文档的浮层（放大表格/图片预览/图表查看器）
+  closeMermaidZoom();
+  cancelMmdEditTimer();   // 旧文档图的延时进编辑不作数
   document.getElementById("bm-lightbox")?.classList.remove("show");
   blocks = parseBlocks(md);
   editingCid = null;
@@ -1977,6 +2203,7 @@ Bridge.register("doc.baseDir", data => {
 // 原生 → JS：右键菜单命令回推
 Bridge.register("menu.onCommand", data => {
   const cmd = data.cmd || "";
+  if (cmd === "mermaid.preview") { openMermaidZoom(data.cid); return; }
   if (cmd.startsWith("table.")) { runTableCommand(cmd, data); return; }
   if (cmd === "paste" && typeof data.text === "string") {
     // 表格格坐标在 → 进格粘贴（菜单弹窗已吹走原焦点，重定位到右键格）
@@ -2012,6 +2239,13 @@ Bridge.register("theme.apply", data => {
   let tag = document.getElementById("theme_css");
   if (!tag) { tag = document.createElement("style"); tag.id = "theme_css"; document.head.appendChild(tag); }
   tag.textContent = data.css || "";
+});
+
+// 原生 → JS：用户偏好（正文字号。捏合/⌘+−/设置窗口统一经 ui.prefs 下发；
+// inline 样式优先级最高，主题 CSS 不会反过来盖掉字号）
+Bridge.register("ui.prefs", data => {
+  const px = Math.min(Math.max(+data.fontSize || 16, 10), 32);
+  document.documentElement.style.setProperty("--font-size-base", px + "px");
 });
 
 // 原生 → JS：library/globalSearch 数据回推
@@ -2058,6 +2292,9 @@ window.Editor = {
   openFindBar,
   closeFindBar,
   _enterEdit: enterEdit,   // 测试钩子
+  _openMermaidZoom: openMermaidZoom,   // 测试钩子：图表查看器直开
+  _closeMermaidZoom: closeMermaidZoom,   // 原生 Esc 中介调用（全屏下系统会抢 Esc，原生层先截）
+  _applyPrefs: d => Bridge.dispatch("ui.prefs", d),   // 测试钩子：字号下发链路
   _enterCellEdit: (cid, r, c) => {
     const blockEl = write().querySelector(`[data-cid="${cid}"]`);
     const td = blockEl && blockEl.querySelector(`[data-r="${r}"][data-c="${c}"]`);

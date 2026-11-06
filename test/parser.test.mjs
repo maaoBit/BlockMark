@@ -1,6 +1,6 @@
 // BlockMark 解析器测试：往返一致性 + 分类 + 行内渲染
 // 运行: node test/parser.test.mjs
-import { parseBlocks, serializeBlocks, tableParse, tableGetCell, tableSetCell } from "../EditorResources/editor/parser.js";
+import { parseBlocks, serializeBlocks, tableParse, tableGetCell, tableSetCell, svgNaturalSize } from "../EditorResources/editor/parser.js";
 import { renderInline, renderTable } from "../EditorResources/editor/inline.js";
 
 let pass = 0, fail = 0;
@@ -205,6 +205,14 @@ t("列表后空行+段落不吞段", parseBlocks("- a\n\n段落\n").length === 2
 t("紧邻非缩进文本仍分段", parseBlocks("- a\n紧邻文本\n").length === 2 && parseBlocks("- a\n紧邻文本\n")[1].type === "paragraph");
 t("多行项往返幂等", serializeBlocks(parseBlocks(serializeBlocks(multi))) === serializeBlocks(multi));
 t("缩进 marker 行算新项", classifyBlock("- a\n  - b\n").type === "ul");
+
+// svgNaturalSize：mermaid 自然尺寸（viewBox 权威，% 拒读——v1.5.0 parseFloat("100%")=100 事故回归）
+t("viewBox 优先", svgNaturalSize("-8 -8 814.875 137.875", "100%", null).w === 814.875);
+t("带 % 的 attr 拒读", svgNaturalSize("", "100%", "50%").w === 0 && svgNaturalSize("", "100%", "50%").h === 0);
+t("无 viewBox 退 px 属性", svgNaturalSize("", "592px", "120").w === 592 && svgNaturalSize("", "592px", "120").h === 120);
+t("viewBox 分隔容忍", svgNaturalSize("0,0,300,200", null, null).w === 300 && svgNaturalSize("0,0,300,200", null, null).h === 200);
+t("坏 viewBox 退属性", svgNaturalSize("abc", "300", "150").w === 300);
+t("全空归零不 NaN", svgNaturalSize(null, null, null).w === 0 && !Number.isNaN(svgNaturalSize(null, null, null).h));
 
 console.log(`\n结果: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

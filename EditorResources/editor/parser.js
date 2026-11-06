@@ -285,3 +285,17 @@ export function tableDeleteCol(source, c) {
   t.aligns.splice(c, 1);
   return tableSerialize(t);
 }
+
+// mermaid svg 自然尺寸（纯函数，editor.js 的 sizeMermaidSvg 调）：
+// viewBox 是权威；attr 可能是 "100%" 这类非 px 值——parseFloat 会瞎读出 100，
+// 图被塞进 100px 白盒缩成蚂蚁（v1.5.0 视觉门事故），带 % 一律拒读
+export function svgNaturalSize(viewBoxStr, wAttr, hAttr) {
+  const vb = String(viewBoxStr || "").trim().split(/[\s,]+/).map(Number);
+  const attrPx = raw => {
+    const s = String(raw || "");
+    return s.endsWith("%") ? 0 : (parseFloat(s) || 0);
+  };
+  const w = (vb.length === 4 && vb[2] > 0 && vb[2]) || attrPx(wAttr);
+  const h = (vb.length === 4 && vb[3] > 0 && vb[3]) || attrPx(hAttr);
+  return { w: w || 0, h: h || 0 };
+}

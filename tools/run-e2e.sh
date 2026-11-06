@@ -1,5 +1,5 @@
 #!/bin/zsh
-# BlockMark — e2e 运行器：bundle → 生成十二套 → headless 浏览器断言 <title>
+# BlockMark — e2e 运行器：bundle → 生成十三套 → headless 浏览器断言 <title>
 # 用法: ./tools/run-e2e.sh [浏览器路径]
 #   浏览器需 Chromium 内核（Edge/Chrome 均可）；缺省按序探测。
 set -uo pipefail
@@ -18,7 +18,7 @@ fi
 
 node tools/bundle.mjs || exit 1
 
-SUITES=(m1 cm m2b m3 m45 look tail m6 m7 m8 m9 m10)
+SUITES=(m1 cm m2b m3 m45 look tail m6 m7 m8 m9 m10 m11)
 fail=0
 for g in $SUITES; do
   node "tools/gen-e2e-$g.mjs" >/dev/null || { echo "$g: GEN-FAIL"; fail=1; continue; }
