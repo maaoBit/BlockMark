@@ -95,6 +95,27 @@ window.addEventListener("DOMContentLoaded", () => {
     r.mergeBack = rsb.style.display === "none" &&
                   document.querySelectorAll('#bm-sidebar .bm-sidebar-tab').length === 2 &&
                   document.getElementById("bm-sidebar-body").querySelectorAll(".bm-outline-item").length === 5;
+    // —— 原地换文档轮2：快照回放（onRestore 后树按快照层级渲染，重开侧栏不再请求 listDocs）——
+    const sent2 = [];
+    window.webkit = { messageHandlers: { bridge: { postMessage: m => sent2.push(m) } } };
+    Bridge.dispatch("library.onRestore", { root: "/tmp/y", current: "/tmp/y/n.md",
+      expanded: ["/tmp/y", "/tmp/y/sub"],
+      docs: [{ dir: "/tmp/y", entries: [
+        { name: "sub", path: "/tmp/y/sub", isDir: true },
+        { name: "n.md", path: "/tmp/y/n.md", isDir: false }] },
+        { dir: "/tmp/y/sub", entries: [
+          { name: "deep.md", path: "/tmp/y/sub/deep.md", isDir: false }] }] });
+    r.onRestoreTree = document.querySelectorAll("#bm-sidebar-body .bm-tree-file").length === 2;  // n.md + 展开的 sub/deep.md
+    r.onRestoreExpanded = !!document.querySelector('.bm-tree-file[data-file="/tmp/y/sub/deep.md"]');
+    r.onRestoreActive = (() => { const n = document.querySelector('.bm-tree-file[data-file="/tmp/y/n.md"]');
+      return !!n && n.classList.contains("active"); })();
+    r.onRestoreSnapshotOk = (() => { const st = JSON.parse(Editor.sidebarFileState());
+      return st.root === "/tmp/y" && st.current === "/tmp/y/n.md" && st.expanded.includes("/tmp/y/sub") &&
+             st.docs.some(d => d.dir === "/tmp/y") && st.docs.some(d => d.dir === "/tmp/y/sub"); })();
+    Editor.toggleSidebar(false);
+    Editor.toggleSidebar(true);
+    r.onRestoreNoListDocs = sent2.every(m => m.name !== "library.listDocs");
+    delete window.webkit;
     const pre = document.createElement("pre");
     pre.id = "e2e-result";
     pre.textContent = JSON.stringify(r);
@@ -104,7 +125,9 @@ window.addEventListener("DOMContentLoaded", () => {
                r.clickSendsOpenFile && r.clickMovesActive && r.metaClickNewWindow && r.onRootRestoresActive &&
                r.outlineTargetOk && r.detachShown && r.detachOutlineInRight && r.detachLeftKeepsFiles &&
                r.detachLeftTabs && r.detachRightTabs && r.searchFollowsFiles && r.rightWidthSet &&
-               r.widthClamped && r.leftWidthDragged && r.dropHintOnLeft && r.mergeBack;
+               r.widthClamped && r.leftWidthDragged && r.dropHintOnLeft && r.mergeBack &&
+               r.onRestoreTree && r.onRestoreExpanded && r.onRestoreActive &&
+               r.onRestoreSnapshotOk && r.onRestoreNoListDocs;
     document.title = ok ? "M3-E2E PASS" : "M3-E2E FAIL";
   } catch (e) {
     const pre = document.createElement("pre");

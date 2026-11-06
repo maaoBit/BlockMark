@@ -1648,7 +1648,7 @@ let libraryRoot = null;      // 侧栏根目录（当前文档所在目录）
 let currentFilePath = null;  // 当前文档绝对路径（高亮用）
 let fileTreeLoaded = false;
 const dirCache = new Map();  // dirPath -> entries[]；值 "loading" 表示请求中
-const expandedDirs = new Set();
+const expandedDirs = new Set();  // onRestore 整体替换内容（clear+add），声明保持 const
 let searchMode = false;
 let searchSeq = 0;
 
@@ -2025,6 +2025,16 @@ Bridge.register("library.onDocs", data => {
   fileTreeLoaded = true;
   if (sidebarOpen && !searchMode) renderFileTree();
 });
+// 原地换文档的侧栏快照回放：保持原根目录/展开集/目录缓存，不重置为新文档父目录
+Bridge.register("library.onRestore", data => {
+  libraryRoot = data.root || libraryRoot;
+  currentFilePath = data.current || null;
+  expandedDirs.clear();
+  for (const d of (data.expanded && data.expanded.length ? data.expanded : [data.root])) expandedDirs.add(d);
+  for (const d of data.docs || []) dirCache.set(d.dir, d.entries || []);
+  fileTreeLoaded = true;
+  if (sidebarOpen && !searchMode) renderFileTree();
+});
 Bridge.register("globalSearch.onResults", data => {
   if (data.seq !== searchSeq) return;   // 过期结果丢弃
   renderSearchResults(data.results || [], data.query, !!data.done);
@@ -2045,6 +2055,13 @@ window.Editor = {
   moveSidebarTab,
   setSidebarWidth,
   sidebarState: () => ({ layout: { ...sidebarLayout }, active: { ...panelActive }, widths: { ...sidebarWidths }, open: sidebarOpen }),
+  // 原地换文档前原生抓取：JSON 字符串（嵌套结构走 evaluateJavaScript 桥接不稳）
+  sidebarFileState: () => JSON.stringify({
+    root: libraryRoot,
+    current: currentFilePath,
+    expanded: [...expandedDirs],
+    docs: [...dirCache.entries()].filter(([, v]) => Array.isArray(v)).map(([dir, entries]) => ({ dir, entries })),
+  }),
   toggleTypewriter,
   toggleFocusMode,
   format,

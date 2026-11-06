@@ -170,9 +170,18 @@ final class EditorWindowController: NSWindowController {
 
     // MARK: - M3 侧栏数据
 
-    /// 列目录一层：path 为空 → 当前文档父目录（先回 onRoot）
+    /// 原地换文档带入的侧栏快照：新 webview 首次 listDocs(空路径) 时回放（library.onRestore），
+    /// 文件树保持原层级，而非重置为新文档父目录（否则点开子目录文件后回不到上级）
+    var pendingSidebarRestore: [String: Any]?
+
+    /// 列目录一层：path 为空 → 当前文档父目录（先回 onRoot）；原地换文档后的首问改为回放快照
     private func handleListDocs(_ data: [String: Any]) {
         let path = data["path"] as? String ?? ""
+        if path.isEmpty, let restore = pendingSidebarRestore {
+            pendingSidebarRestore = nil
+            dispatchToJs("library.onRestore", restore)
+            return
+        }
         let dir: URL
         if !path.isEmpty {
             dir = URL(fileURLWithPath: path)
@@ -429,6 +438,19 @@ final class EditorWindowController: NSWindowController {
             restoreSidebarHighlight()
             return
         }
+        // 先抓侧栏快照（根目录/展开集/目录缓存）——新 webview 回放，文件树层级不动
+        webView.evaluateJavaScript("Editor.sidebarFileState()") { [weak self] result, _ in
+            guard let self else { return }
+            var restore: [String: Any]?
+            if let s = result as? String, let d = s.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                restore = obj   // 解析失败 → nil，退回"新文档父目录当根"的默认行为
+            }
+            self.continueReplace(with: url, sidebarRestore: restore)
+        }
+    }
+
+    private func continueReplace(with url: URL, sidebarRestore: [String: Any]?) {
         let inheritFrame = window?.frame
         reviewUnsavedChanges(reason: "切换文档") { [weak self] proceed in
             guard let self else { return }
@@ -441,7 +463,8 @@ final class EditorWindowController: NSWindowController {
                 }
                 self.replaceInFlight = false
                 newDoc.presentEditorWindow(inheritingFrame: inheritFrame)
-                self.completeClose()   // 审查已过；新窗已显示，此时关旧窗不触发“最后一窗退出”
+                newDoc.editorWC?.pendingSidebarRestore = sidebarRestore   // ready 后 listDocs(空) 触发回放
+                self.completeClose()   // 审查已过；新窗已显示，此时关旧窗不触发”最后一窗退出”
             }
         }
     }
