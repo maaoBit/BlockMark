@@ -8,6 +8,8 @@ const HEADING = /^(#{1,6})\s+(.*)$/;
 const HR = /^([-*_])(\s*\1){2,}\s*$/;
 const UL_ITEM = /^(\s*)[-*+]\s+(.*)$/;
 const OL_ITEM = /^(\s*)\d+[.)]\s+(.*)$/;
+// 缩进延续行：多行列表项的折行内容（GFM 常态写法），归属上一个列表项
+const LIST_CONT = /^\s+\S/;
 const QUOTE = /^>\s?/;
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
 const TABLE_SEP = /^\s*\|[\s:|-]+\|\s*$/;
@@ -42,12 +44,13 @@ export function classifyBlock(source, atDocStart = false) {
   // 脚注定义：整块都是 [^id]: 行
   if (lines.every(l => FOOTNOTE_DEF.test(l))) return { type: "footnote" };
   if (lines.every(l => QUOTE.test(l) || l.trim() === "")) return { type: "quote" };
-  if (lines.every(l => UL_ITEM.test(l) || l.trim() === "")) {
-    const items = lines.filter(l => l.trim());
+  // 列表内容行：marker 行 / 空行 / 缩进延续行（多行项）；首行必须是 marker（防纯缩进文本误判）
+  if (UL_ITEM.test(first) && lines.every(l => UL_ITEM.test(l) || l.trim() === "" || LIST_CONT.test(l))) {
+    const items = lines.filter(l => l.trim() && UL_ITEM.test(l));
     const tasks = items.some(l => TASK_ITEM.test(l));
     return tasks ? { type: "ul", tasks: true } : { type: "ul" };
   }
-  if (lines.every(l => OL_ITEM.test(l) || l.trim() === "")) return { type: "ol" };
+  if (OL_ITEM.test(first) && lines.every(l => OL_ITEM.test(l) || l.trim() === "" || LIST_CONT.test(l))) return { type: "ol" };
   if (lines.length >= 2 && TABLE_ROW.test(first) && TABLE_SEP.test(lines[1]) &&
       lines.slice(1).every(l => TABLE_ROW.test(l))) return { type: "table" };
   return { type: "paragraph" };
@@ -122,9 +125,16 @@ export function parseBlocks(md) {
     }
     if (UL_ITEM.test(line) || OL_ITEM.test(line)) {
       const isUl = UL_ITEM.test(line);
+      const item = isUl ? UL_ITEM : OL_ITEM;
       const start = i;
-      while (i < lines.length && ((isUl ? UL_ITEM : OL_ITEM).test(lines[i]) || lines[i].trim() === "")) i++;
-      // 列表后若紧跟普通文本行且非列表项，回退一格避免吞段
+      let prevBlank = false;
+      while (i < lines.length) {
+        const l = lines[i];
+        if (item.test(l)) { i++; prevBlank = false; continue; }
+        if (l.trim() === "") { i++; prevBlank = true; continue; }   // 空行留在块内（松散列表），render 过滤
+        if (LIST_CONT.test(l)) { i++; prevBlank = false; continue; } // 缩进延续行并入当前项（多行项）
+        break;   // 空行后非缩进非列表行 → 列表结束；紧邻的非缩进文本行同（维持不吞段）
+      }
       push(lines.slice(start, i).join("\n"));
       continue;
     }

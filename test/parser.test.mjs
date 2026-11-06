@@ -192,5 +192,19 @@ const midFm = parseBlocks("正文\n\n---\ntitle: x\n---\n");
 t("中部 frontmatter 不守恒修复", midFm.every(b => b.type !== "frontmatter") && serializeBlocks(midFm) === serializeBlocks(parseBlocks(serializeBlocks(midFm))), JSON.stringify(midFm.map(b => b.type)));
 t("文档首 frontmatter 仍识别", parseBlocks("---\ntitle: x\n---\n\n正文\n")[0].type === "frontmatter");
 
+console.log("== 多行列表项（缩进延续行）");
+// 用户实报：延续行后紧跟的 marker 行曾被前块吞成段落文字（只有第一个 - 渲染成点）
+const multi = parseBlocks("- 甲\n\n- 乙：编辑\n\n  `file.yaml`，复核\n  `label`；验证。\n- 丙：填写 `<X>`\n  和可选 `<Y>`，\n  在 `net.yaml` 中填写。\n\n正文段。\n");
+t("多行项聚成单块", multi.length === 2 && multi[0].type === "ul" && multi[1].type === "paragraph", JSON.stringify(multi.map(b => b.type)));
+t("延续行留在块内", multi[0].source.includes("`file.yaml`") && multi[0].source.includes("net.yaml"));
+t("后续 marker 不丢", ["- 甲", "- 乙：编辑", "- 丙：填写"].every(m => multi[0].source.includes(m)));
+t("多行项分类 ul", classifyBlock("- 乙：编辑\n\n  `file.yaml`，复核\n").type === "ul");
+t("ol 延续行同类", classifyBlock("1. 甲\n   折行\n2. 乙\n").type === "ol" && parseBlocks("1. 甲\n   折行\n2. 乙\n").length === 1);
+t("纯缩进文本非列表", classifyBlock("  只有缩进\n- a\n").type === "paragraph");
+t("列表后空行+段落不吞段", parseBlocks("- a\n\n段落\n").length === 2 && parseBlocks("- a\n\n段落\n")[1].type === "paragraph");
+t("紧邻非缩进文本仍分段", parseBlocks("- a\n紧邻文本\n").length === 2 && parseBlocks("- a\n紧邻文本\n")[1].type === "paragraph");
+t("多行项往返幂等", serializeBlocks(parseBlocks(serializeBlocks(multi))) === serializeBlocks(multi));
+t("缩进 marker 行算新项", classifyBlock("- a\n  - b\n").type === "ul");
+
 console.log(`\n结果: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

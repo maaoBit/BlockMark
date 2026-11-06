@@ -76,23 +76,42 @@ function renderBlockInner(b) {
     case "quote":
       return `<blockquote class="bm-render">${src.split("\n").map(l => renderInline(l.replace(/^>\s?/, ""))).join("<br>")}</blockquote>`;
     case "ul": {
-      const items = src.split("\n").filter(l => l.trim());
+      // 多行项：marker 行分组，缩进延续行并入上一项（列表项折行是 GFM 常态写法）
+      const groups = [];
+      for (const l of src.split("\n")) {
+        if (!l.trim()) continue;
+        if (/^\s*[-*+]\s+/.test(l)) groups.push([l]);
+        else if (groups.length) groups[groups.length - 1].push(l.trim());
+      }
+      const renderBody = ls => ls.map((x, k) =>
+        renderInline(k === 0 ? x.replace(/^\s*[-*+]\s+/, "") : x)).join("<br>");
       if (b.tasks) {
         let ti = -1;
-        return `<ul class="bm-render bm-tasks">` + items.map(l => {
-          const m = l.match(/^(\s*[-*+]\s+)\[( |x|X)\](\s+)(.*)$/);
-          if (!m) return `<li>${renderInline(l.replace(/^\s*[-*+]\s+/, ""))}</li>`;
+        return `<ul class="bm-render bm-tasks">` + groups.map(ls => {
+          const m = ls[0].match(/^(\s*[-*+]\s+)\[( |x|X)\](\s+)(.*)$/);
+          if (!m) return `<li>${renderBody(ls)}</li>`;
           ti++;
           const done = m[2] !== " ";
-          return `<li class="bm-task${done ? " bm-task-done" : ""}"><span class="bm-task-box" data-index="${ti}" contenteditable="false">${done ? "\u2713" : ""}</span>${renderInline(m[4])}</li>`;
+          // 任务项正文：勾选框后首行取 m[4]，其余为延续行
+          const body = [renderInline(m[4]), ...ls.slice(1).map(x => renderInline(x))].join("<br>");
+          return `<li class="bm-task${done ? " bm-task-done" : ""}"><span class="bm-task-box" data-index="${ti}" contenteditable="false">${done ? "\u2713" : ""}</span>${body}</li>`;
         }).join("") + `</ul>`;
       }
-      return `<ul class="bm-render">${items.map(l =>
-        `<li>${renderInline(l.replace(/^\s*[-*+]\s+/, ""))}</li>`).join("")}</ul>`;
+      return `<ul class="bm-render">${groups.map(ls =>
+        `<li>${renderBody(ls)}</li>`).join("")}</ul>`;
     }
-    case "ol":
-      return `<ol class="bm-render">${src.split("\n").filter(l => l.trim()).map(l =>
-        `<li>${renderInline(l.replace(/^\s*\d+[.)]\s+/, ""))}</li>`).join("")}</ol>`;
+    case "ol": {
+      const groups = [];
+      for (const l of src.split("\n")) {
+        if (!l.trim()) continue;
+        if (/^\s*\d+[.)]\s+/.test(l)) groups.push([l]);
+        else if (groups.length) groups[groups.length - 1].push(l.trim());
+      }
+      return `<ol class="bm-render">${groups.map(ls => {
+        const body = ls.map((x, k) => renderInline(k === 0 ? x.replace(/^\s*\d+[.)]\s+/, "") : x)).join("<br>");
+        return `<li>${body}</li>`;
+      }).join("")}</ol>`;
+    }
     case "table":
       return renderTable(src);
     case "frontmatter": {
