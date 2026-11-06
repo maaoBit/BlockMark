@@ -170,18 +170,9 @@ final class EditorWindowController: NSWindowController {
 
     // MARK: - M3 侧栏数据
 
-    /// 原地换文档带入的侧栏快照：新 webview 首次 listDocs(空路径) 时回放（library.onRestore），
-    /// 文件树保持原层级，而非重置为新文档父目录（否则点开子目录文件后回不到上级）
-    var pendingSidebarRestore: [String: Any]?
-
-    /// 列目录一层：path 为空 → 当前文档父目录（先回 onRoot）；原地换文档后的首问改为回放快照
+    /// 列目录一层：path 为空 → 当前文档父目录（先回 onRoot）
     private func handleListDocs(_ data: [String: Any]) {
         let path = data["path"] as? String ?? ""
-        if path.isEmpty, let restore = pendingSidebarRestore {
-            pendingSidebarRestore = nil
-            dispatchToJs("library.onRestore", restore)
-            return
-        }
         let dir: URL
         if !path.isEmpty {
             dir = URL(fileURLWithPath: path)
@@ -420,9 +411,9 @@ final class EditorWindowController: NSWindowController {
 
     private var replaceInFlight = false   // 双击文件项防重入（审查/打开均异步，防双表单双替换）
 
-    /// 当前窗口原地换文档：未保存审查 → 静默打开新文档 → 继承窗口位置显示 → 关旧窗。
-    /// 顺序必须“先显新窗再关旧窗”：applicationShouldTerminateAfterLastWindowClosed=true，
-    /// 若先关旧窗，应用会在两步之间按“最后一窗已关”直接退出。
+    /// 当前窗口原地换文档：未保存审查 → 静默打开新文档 → wc 转移——窗口/webview/侧栏 DOM
+    /// 全不动，只重载编辑器内容（Obsidian 式无整窗刷新）。旧文档解绑注销，窗口不重建，
+    /// 也就没有”先显新窗再关旧窗”的 lastWindow 退出时序问题。
     private func replaceCurrentDocument(with url: URL) {
         guard !replaceInFlight else { return }
         replaceInFlight = true
@@ -438,20 +429,6 @@ final class EditorWindowController: NSWindowController {
             restoreSidebarHighlight()
             return
         }
-        // 先抓侧栏快照（根目录/展开集/目录缓存）——新 webview 回放，文件树层级不动
-        webView.evaluateJavaScript("Editor.sidebarFileState()") { [weak self] result, _ in
-            guard let self else { return }
-            var restore: [String: Any]?
-            if let s = result as? String, let d = s.data(using: .utf8),
-               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
-                restore = obj   // 解析失败 → nil，退回"新文档父目录当根"的默认行为
-            }
-            self.continueReplace(with: url, sidebarRestore: restore)
-        }
-    }
-
-    private func continueReplace(with url: URL, sidebarRestore: [String: Any]?) {
-        let inheritFrame = window?.frame
         reviewUnsavedChanges(reason: "切换文档") { [weak self] proceed in
             guard let self else { return }
             guard proceed else { self.abortReplace(); return }   // 取消审查 → 拨回高亮
@@ -462,10 +439,25 @@ final class EditorWindowController: NSWindowController {
                     return
                 }
                 self.replaceInFlight = false
-                newDoc.presentEditorWindow(inheritingFrame: inheritFrame)
-                newDoc.editorWC?.pendingSidebarRestore = sidebarRestore   // ready 后 listDocs(空) 触发回放
-                self.completeClose()   // 审查已过；新窗已显示，此时关旧窗不触发”最后一窗退出”
+                self.adopt(document: newDoc)
             }
+        }
+    }
+
+    /// wc 转移：旧文档解绑注销（审查已过），本 wc 绑定新文档并只重载编辑器内容
+    private func adopt(document newDoc: MarkdownDocument) {
+        if let old = mdDocument { old.detachWindowControllerAndClose(self) }
+        self.document = newDoc
+        docRef = newDoc
+        window?.title = newDoc.displayName ?? "未标记"
+        newDoc.attachExistingWindowController(self)
+        if let dir = newDoc.fileURL?.deletingLastPathComponent() {
+            // 图片相对路径基准（file URL string 已编码，含中文/空格安全）
+            dispatchToJs("doc.baseDir", ["base": dir.absoluteString + "/"])
+        }
+        sendMarkdown(newDoc.markdown)   // Editor.open：清撤销栈/编辑态并重渲染
+        if let p = newDoc.fileURL?.path {
+            dispatchToJs("library.onCurrent", ["current": p])   // 侧栏高亮切换，根目录不动
         }
     }
 

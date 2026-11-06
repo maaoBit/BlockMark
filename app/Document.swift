@@ -105,24 +105,32 @@ final class MarkdownDocument: NSDocument {
     }
 
     override func makeWindowControllers() {
-        presentEditorWindow(inheritingFrame: nil)
-    }
-
-    /// 建窗显示编辑器。AppKit 的 odoc 流程会把 makeWindowControllers 调用两次（实证）：
-    /// 先清旧控制器与其窗口，保证幂等。frame 非空时继承——侧栏原地换文档时接管原窗口
-    /// 位置尺寸，视觉上"原地换文档"不跳位。
-    func presentEditorWindow(inheritingFrame frame: NSRect?) {
+        // AppKit 的 odoc 流程会调用本方法两次（实证）：先清旧控制器与其窗口，保证幂等
         if let old = strongEditorWC {
             removeWindowController(old)
             old.window?.close()
             strongEditorWC = nil
         }
         let wc = EditorWindowController(document: self)
-        if let frame, let win = wc.window { win.setFrame(frame, display: false) }
         addWindowController(wc)
         strongEditorWC = wc
         wc.showWindow(nil)
         startWatching()
+    }
+
+    /// 原地换文档（wc 转移）：新文档接管既有窗口控制器——窗口/webview/侧栏 DOM 全不动，
+    /// 只由 wc 重载编辑器内容（Obsidian 式无整窗刷新）。startWatching 收口在此（private）。
+    func attachExistingWindowController(_ wc: EditorWindowController) {
+        addWindowController(wc)
+        strongEditorWC = wc
+        startWatching()
+    }
+
+    /// 原地换文档：旧文档退场——解绑 wc 并从文档控制器注销（未保存审查由调用方先行完成）
+    func detachWindowControllerAndClose(_ wc: EditorWindowController) {
+        if strongEditorWC === wc { strongEditorWC = nil }
+        removeWindowController(wc)
+        close()
     }
 
     /// JS 层报 updateChangeCount 时标记已编辑（驱动 ⌘S/关闭确认）
