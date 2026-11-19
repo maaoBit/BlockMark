@@ -166,8 +166,10 @@ function enhanceImages() {
 }
 
 // 表格块挂"放大查看"按钮（hover 浮现；只进活 DOM，导出用 blockHtml 重渲不含按钮）
+// 排除 .bm-editing：整块源码编辑中塞进按钮会被 commitEditing 的 el.textContent
+// 连同 "⛶ 放大" 一起烤进 b.source（编辑中块重渲只换 innerHTML，不清 contentEditable）
 function enhanceTables() {
-  for (const el of write().querySelectorAll('.bm-block[data-type="table"]')) {
+  for (const el of write().querySelectorAll('.bm-block[data-type="table"]:not(.bm-editing)')) {
     if (el.querySelector(".bm-table-zoom-btn")) continue;
     const btn = document.createElement("button");
     btn.type = "button";

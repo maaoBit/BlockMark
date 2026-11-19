@@ -185,6 +185,22 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await sleep(20);
 
+    // 11) 回归：编辑中的表格块不得被塞进放大按钮——
+    //     旧 enhanceTables 全表扫，A 整块源码编辑中恰逢他块 rerenderBlock
+    //     （此处：B 表单元格提交）→ 按钮混入 A 的 textContent → 提交烤进 source（"⛶ 放大" 污染）
+    Editor.open("| A1 | A2 |\\n|---|---|\\n| a | b |\\n\\n中间段落\\n\\n| B1 | B2 |\\n|---|---|\\n| c | d |\\n");
+    const tbls = [...document.querySelectorAll('[data-type="table"]')];
+    const elA = tbls[0], cidB2 = tbls[1].dataset.cid;
+    elA.querySelector("table").dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    r.editingNoBtn = elA.classList.contains("bm-editing") && !elA.querySelector(".bm-table-zoom-btn");
+    Editor._enterCellEdit(cidB2, 1, 0);
+    Editor._commitCellEdit();   // rerenderBlock(B) → enhanceTables 全表扫的触发窗
+    r.otherCommitNoBtnInEdit = !elA.querySelector(".bm-table-zoom-btn");
+    elA.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await sleep(20);
+    r.mdCleanAfterCommit = !Editor.getMarkdown().includes("放大");
+    r.btnBackAfterRender = !!document.querySelector('[data-cid="' + elA.dataset.cid + '"] .bm-table-zoom-btn');
+
     const pre = document.createElement("pre");
     pre.id = "e2e-result";
     pre.textContent = JSON.stringify(r);
