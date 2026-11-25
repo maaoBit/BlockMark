@@ -6,7 +6,8 @@
 
 ## 特性
 
-- **所见即所得块编辑**：点击任意块就地显示 Markdown 源码（定界符半透明常驻），离开即重渲染；⌘B/⌘I 选区包裹、Enter 延续列表/引用前缀
+- **所见即所得块编辑**：点击哪里，光标就落在对应的源码位置（标题井号、列表符号、粗体/链接定界符等不可见语法不占位）；在未点击过的段落上直接拖动即可选择、双击选中看到的词（支持中文）；⌘点击打开链接。编辑中的块去点别处一次点击即生效。⌘B/⌘I 选区包裹、Enter 延续列表/引用前缀
+- **可诊断**：应用菜单「导出编辑器诊断信息」一键复制最近的编辑器状态切换记录（页面线程卡死时 5 秒内明确提示）
 - **完整语法面**：标题/列表/任务（点击勾选）/引用/表格（逐单元格 Tab 导航编辑）/代码块（CodeMirror 17 语言高亮+编辑）/公式（KaTeX 块级+行内）/mermaid 图表/脚注互跳/front matter
 - **侧栏**：文件树 + 大纲 + 全局搜索（⌘\ 开关）
 - **查找** ⌘F（高亮+跳转）、打字机/专注模式、图片粘贴落盘 `assets/`、点击预览
@@ -37,10 +38,12 @@ open build/BlockMark.app
 ## 测试
 
 ```bash
-npm test          # 单测 136 项（解析器 89/行内编辑 20/语法面 27）
+npm test          # 单测 217 项（解析器 105/行内编辑 20/语法面 27/落点映射 46/跨工件契约 19）
+./tools/run-e2e.sh    # e2e 十四套，一键跑完
+./tools/run-webkit.sh # 系统 WebKit 探针台：定向场景 + 定种子随机序列
 ```
 
-e2e 十三套（m1/cm/m2b/m3/m45/look/tail/m6–m11）：`node tools/gen-e2e-<name>.mjs` 生成
+e2e 十四套（m1/cm/m2b/m3/m45/look/tail/m6–m12）：`node tools/gen-e2e-<name>.mjs` 生成
 `EditorResources/e2e-<name>.html`，headless Chromium/Edge `--dump-dom` 断言 `<title>`：
 
 ```bash
@@ -50,6 +53,24 @@ node tools/gen-e2e-tail.mjs
   --dump-dom --virtual-time-budget=5000 \
   "file://$PWD/EditorResources/e2e-tail.html" | grep -o "<title>[^<]*</title>"
 ```
+
+**为什么要多一层 WebKit 探针台**：e2e 用的是 Chromium + 合成事件，看不到原生焦点事件——
+"编辑中的块去点表格单元格时首击被吞"这类缺陷只在真实 WKWebView 里出现。`tools/webkit-probe/`
+在离屏窗口里加载与 App 相同的 bundle、投递真实鼠标事件并逐步校验"状态登记 ↔ 真实焦点"是否一致；
+离屏运行，不抢焦点、不发全局键鼠。脚本格式见 [`specs/001-reliable-click-caret/contracts/editor-click-api.md`](specs/001-reliable-click-caret/contracts/editor-click-api.md) §5。
+
+```bash
+./tools/run-webkit.sh                    # 全部场景 + 300 条随机序列
+./tools/run-webkit.sh --fuzz-only --seeds 1000
+```
+
+## 开发流程（Spec Kit）
+
+本仓库自 001 号特性起采用 [Spec Kit](https://github.com/github/spec-kit)（ZCode 技能形态，位于 `.zcode/skills/speckit-*`）：
+每个特性或缺陷修复依次经过 **specify → plan → tasks → implement**，产出物落在 `specs/NNN-<name>/`。
+项目原则见宪章 [`.specify/memory/constitution.md`](.specify/memory/constitution.md)（单一事实源、被测物即交付物、
+回归门禁先行、手感对标成熟编辑器、原创与精简）。首个按此流程交付的特性：
+[`specs/001-reliable-click-caret/`](specs/001-reliable-click-caret/spec.md)。
 
 ## 已知坑（本项目实证）
 
@@ -75,9 +96,10 @@ MVP 已实现：paragraph / h1-h6 / 引用 / 有序无序列表 / 围栏代码 /
 - [x] P0 观感对齐轮（2026-10-11 完成）：编辑态黄底→`var(--block-hover)` 淡蓝（编辑不做"模式切换"视觉，hover 与编辑同色系）；排印节奏（内容列 820px、行高 1.8、h1 1.9em→h6 0.95em 梯度、编辑态字号不塌缩）；⌘B/⌘I 选区包裹（选区偏移数学+relight）；Enter 列表/引用前缀延续（空项消除前缀、有序自动 +1）；格式菜单（加粗⌘B/斜体⌘I/标题1-6 ⌘1-6/引用/代码块/公式块/表格⌘T/分隔线，representedObject=cmd 直发 `Editor.format`）；代码块语言角标（`pre.bm-code[data-lang]::after`）；Open Recent（NSMenuDelegate 动态菜单）；**原创应用图标**（imagegen 生成 2048px 深蓝渐变几何块，PIL superellipse n=5 遮罩→iconutil icns）。LOOK-E2E PASS（computed style 断言：h1/正文=1.9、编辑底色 rgba(47,111,237,0.04)、粗斜体真渲染、列宽 820）
 
 - [x] 长尾功能轮（2026-10-11 完成）：**查找 ⌘F**（顶部浮条+全文 mark 高亮+Enter/Shift+Enter 跳转+计数，关闭 unwrap 恢复）；**表格逐单元格编辑**（渲染态 td/th contenteditable，点击显示该格源码，blur/Esc 写回，Tab/Shift+Tab 左右、Enter 下行同列、末行 Enter 出表格续写段落，`\|` 转义往返）；**右键菜单**（JS 收集上下文→桥→原生 NSMenu 按右键位置弹出：剪切/拷贝/粘贴（原生 pasteboard）/打开链接/拷贝链接/图片另存为/加粗/斜体）；**拖拽打开**（.md 拖入窗口→DropView→原生 odoc，NSWindow 拖拽方法不可 override 故挂 contentView）；**Pandoc 导出 Word**（-f gfm -t docx，stdin 管道；未装提示 brew install pandoc）；**URL 智能粘贴**（选中文本+粘贴 URL→[文本](URL)）；**图片点击 lightbox 预览**；**图片相对路径修复**（doc.baseDir 桥推文档目录 file URL 前缀+loadFileURL 读权限放宽到根——此前贴图 404）；任务列表删除线增强。单测 87（parser 40）+ TAIL-E2E PASS（表格导航/查找/粘贴/lightbox/图片 base/删除线）
+- [x] 可靠点击与点击落光标轮（2026-11-25 完成，按 Spec Kit 流程，规格见 `specs/001-reliable-click-caret/`）：**点哪里光标落哪里**（渲染态命中位置换算成源码偏移，标题井号/列表符号/粗体与链接定界符等不可见语法不占位；首次按下即可拖选、双击按分词选中所见的词；单击链接落光标、⌘点击打开）；**点击不再被吞**（编辑中的块去点表格单元格/表格旁空白时首击失效的根因：提交旧编辑态寄托在旧块失焦的延时回调上，改为切换流程内同步提交；空白区兜底改按事件分发路径判定，不再把块内点击误判成空白）；每次点击前校验并修复"编辑状态 ↔ 真实焦点"的不一致（自愈）；应用菜单「导出编辑器诊断信息」（页面线程无响应时 5 秒内提示）。新增系统 WebKit 探针台 `tools/run-webkit.sh`（真实鼠标事件，覆盖 Chromium e2e 看不到的原生焦点行为）
 
-- 单测：`node test/parser.test.mjs`（89）+ `test/m1.test.mjs`（20）+ `test/m2b.test.mjs`（27）
-- e2e（全部基于 index.bundle.html 生成，Edge headless `--dump-dom` 断言 title）：`tools/gen-e2e-{m1,cm,m2b,m3,m45,look,tail,m6,m7,m8,m9,m10,m11}.mjs` 十三套；look 套走 getComputedStyle 静态计算值断言观感（字号比/底色/列宽——dump-dom 无渲染循环，但 computed style 静态值可用，只有 transition 动画值不可靠）；link 样式表 CSSOM 在 headless 有读竞态，CSS 规则断言走构建期文件级 grep
+- 单测：`node test/parser.test.mjs`（105）+ `test/m1.test.mjs`（20）+ `test/m2b.test.mjs`（27）+ `test/caret-map.test.mjs`（46）+ `test/contract.test.mjs`（19）
+- e2e（全部基于 index.bundle.html 生成，Edge headless `--dump-dom` 断言 title）：`tools/gen-e2e-{m1,cm,m2b,m3,m45,look,tail,m6,m7,m8,m9,m10,m11,m12}.mjs` 十四套；look 套走 getComputedStyle 静态计算值断言观感（字号比/底色/列宽——dump-dom 无渲染循环，但 computed style 静态值可用，只有 transition 动画值不可靠）；link 样式表 CSSOM 在 headless 有读竞态，CSS 规则断言走构建期文件级 grep
 - **坑**：file:// + ES module 直连在 headless 下加载竞态 flaky（test/e2e-harness.html 旧基建已弃用，迁 bundle 基建后稳定；module 调试路径可用——bridge.js 已补副作用导入）；JS `String.replace` 替换串里 `$$` 是转义序列（生成器必须用函数形式 `replace(x, () => v)`）
 - 真机验证：`open -a build/BlockMark.app <file>`（**裸二进制直跑 argv 不会被 AppKit 打开**——此前"argv 打开"实为 macOS 窗口恢复的假象，已实证）；截图走 `screencapture -l <winid>`
 

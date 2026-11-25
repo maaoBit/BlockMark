@@ -1,0 +1,249 @@
+[
+{
+"kind": "log",
+"note": "I1 连续三个拼音词，每步后可继续输入"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"pos": "(() => { const p = __bmChar('b2', 0, 0, 0.5); return [document.querySelector('[data-cid=b2] p').getBoundingClientRect().right - 2, p[1]]; })()",
+"expect": "block:b2"
+},
+{
+"kind": "compose",
+"text": "ni:你",
+"replace": true,
+"hold": 40
+},
+{
+"kind": "compose",
+"text": "hao:好",
+"replace": true,
+"hold": 40
+},
+{
+"kind": "compose",
+"text": "ma:吗",
+"replace": true,
+"hold": 40
+},
+{
+"kind": "type",
+"text": "W",
+"must": true
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"你好世界，第二段落。你好吗W\")",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "I2 组合未提交时点击别处"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"sel": ".bm-block[data-cid=b2] p",
+"fx": 0.3,
+"fy": 0.5,
+"expect": "block:b2"
+},
+{
+"kind": "mark",
+"text": "ni",
+"replace": true
+},
+{
+"kind": "click",
+"sel": ".bm-block[data-cid=b7] p",
+"fx": 0.5,
+"fy": 0.5,
+"expect": "block:b7"
+},
+{
+"kind": "type",
+"text": "X",
+"must": true
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"X\")",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "I3 表格源码内输入后点正文"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"sel": ".bm-block[data-cid=b5] .bm-table-wrap",
+"fx": 0.9,
+"fy": 0.5,
+"expect": "block:b5"
+},
+{
+"kind": "compose",
+"text": "ni:你",
+"replace": true,
+"hold": 40
+},
+{
+"kind": "click",
+"sel": ".bm-block[data-cid=b6] p",
+"fx": 0.5,
+"fy": 0.5,
+"expect": "block:b6"
+},
+{
+"kind": "type",
+"text": "X",
+"must": true
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"X\")",
+"equals": true
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"你\")",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "I4 单元格内输入后点正文"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"pos": "(() => { const tn = document.querySelector('[data-cid=b5] [data-r=\"1\"][data-c=\"0\"]').firstChild; const r = document.createRange(); r.setStart(tn, 0); r.setEnd(tn, 1); const b = r.getBoundingClientRect(); return [b.left + 1, b.top + b.height / 2]; })()",
+"expect": "cell:1:0"
+},
+{
+"kind": "compose",
+"text": "ni:你",
+"replace": true,
+"hold": 40
+},
+{
+"kind": "click",
+"sel": ".bm-block[data-cid=b6] p",
+"fx": 0.5,
+"fy": 0.5,
+"expect": "block:b6"
+},
+{
+"kind": "type",
+"text": "X",
+"must": true
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"X\")",
+"equals": true
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"| 你a1 | a2 |\")",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "I5 表格源码内组合未提交时点正文"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"sel": ".bm-block[data-cid=b5] .bm-table-wrap",
+"fx": 0.9,
+"fy": 0.5,
+"expect": "block:b5"
+},
+{
+"kind": "mark",
+"text": "ni",
+"replace": true
+},
+{
+"kind": "click",
+"sel": ".bm-block[data-cid=b6] p",
+"fx": 0.5,
+"fy": 0.5,
+"expect": "block:b6"
+},
+{
+"kind": "type",
+"text": "X",
+"must": true
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"X\")",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "I6 落点后连续输入（点『世』之前）"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"pos": "__bmChar('b2', 0, 2, 0.2)",
+"expect": "block:b2"
+},
+{
+"kind": "compose",
+"text": "ni:你",
+"replace": true,
+"hold": 40
+},
+{
+"kind": "compose",
+"text": "hao:好",
+"replace": true,
+"hold": 40
+},
+{
+"kind": "expect",
+"js": "Editor.getMarkdown().includes(\"你好你好世界，\")",
+"equals": true
+},
+{
+"kind": "check"
+}
+]

@@ -597,6 +597,29 @@ final class EditorWindowController: NSWindowController {
         mdDocument?.saveAs(sender)
     }
 
+    // MARK: - 诊断导出（应用菜单「导出编辑器诊断信息」）
+
+    /// 页面侧 `Editor._diag()` 返回只读 JSON（状态切换留痕 + 当前一致性检查），复制到剪贴板。
+    /// 页面线程卡死时求值永不返回：以 5 秒为限明确提示，把"线程卡死"与"状态不一致"两类故障区分开。
+    @objc func exportDiagnostics(_ sender: Any?) {
+        var settled = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard !settled else { return }
+            self?.toast("编辑器无响应超过 5 秒（页面线程疑似卡死）")
+        }
+        webView.evaluateJavaScript("Editor._diag()") { [weak self] result, error in
+            settled = true
+            guard let self else { return }
+            if let text = result as? String, !text.isEmpty {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                self.toast("编辑器诊断信息已复制到剪贴板")
+            } else {
+                self.toast("导出诊断信息失败：\(error?.localizedDescription ?? "页面未返回结果")")
+            }
+        }
+    }
+
     // MARK: - 查找 ⌘F（编辑器内 findbar）
 
     @objc func findAction(_ sender: Any?) {

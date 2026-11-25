@@ -6,7 +6,7 @@
 //   - 代码块编辑态内嵌 CodeMirror（M2），渲染态 runMode 语法高亮
 //   - 事实源是块对象的 source 字段，DOM 由它派生
 import { parseBlocks, serializeBlocks, reclassify, classifyBlock, mathTex, toggleTaskItem, tableGetCell, tableSetCell, tableParse, tableInsertRow, tableDeleteRow, tableInsertCol, tableDeleteCol, svgNaturalSize } from "./parser.js";
-import { renderInline, renderTable, escapeHtml, highlightEditableSource } from "./inline.js";
+import { renderInline, renderTable, escapeHtml, highlightEditableSource, blockLineMap, caretSourceOffset } from "./inline.js";
 import "./bridge.js";   // 副作用导入：注册 window.Bridge（module 调试路径此前因缺它整体瘫痪）
 
 const write = () => document.getElementById("write");
@@ -20,6 +20,20 @@ let undoStack = [], redoStack = [];
 let changeTimer = null;
 let sourceMode = false;
 let sourceCm = null;
+let transitioning = 0;   // 程序化切换编辑目标进行中：此时派发的焦点事件不代表用户意图
+
+// 诊断留痕：环形缓冲只记状态切换与焦点变化（不记正文），供 Editor._diag() 导出
+const TRACE_MAX = 80;
+const traceLog = [];
+function trace(ev, data) {
+  traceLog.push(Object.assign({ t: Math.round(performance.now()), ev }, data || {}));
+  if (traceLog.length > TRACE_MAX) traceLog.shift();
+}
+// 程序化切换期间屏蔽 focusout 的提交逻辑（切换流程自己负责提交旧会话）
+function inTransition(fn) {
+  transitioning++;
+  try { return fn(); } finally { transitioning--; }
+}
 
 // CodeMirror 语言别名（依赖 modes.bundle.js 实际打包的模式）
 const CM_MODES = {
@@ -310,7 +324,12 @@ function updateMarksActive() {
 
 function findBlock(cid) { return blocks.find(b => b.cid === cid); }
 
-function enterEdit(cid, atEnd = true) {
+// caretOffset：给定则把光标放在该源码偏移处（点击落光标）；否则按 atEnd 放块首/块尾
+function enterEdit(cid, atEnd = true, caretOffset = null) {
+  return inTransition(() => enterEditInner(cid, atEnd, caretOffset));
+}
+
+function enterEditInner(cid, atEnd = true, caretOffset = null) {
   cancelMmdEditTimer();   // 用户改点他处进编辑：单击 mermaid 的 280ms 延时不得再 fire 劫持焦点
   let b = findBlock(cid);
   if (!b) return;
@@ -319,7 +338,10 @@ function enterEdit(cid, atEnd = true) {
   if ((b.type === "code" || b.type === "math") && window.CodeMirror) { mountCmBlock(b, b.type); return; }
   if (editingCid === cid) {   // 已在该块编辑态（空白点击复用空段等）：只归位光标，不走提交（空块会被自删）
     const self = write().querySelector(`[data-cid="${cid}"]`);
-    if (self) { placeCaret(self, atEnd); return; }
+    if (self) {
+      if (caretOffset !== null) setCaretTextOffset(self, caretOffset); else placeCaret(self, atEnd);
+      return;
+    }
   }
   commitEditing();
   b = findBlock(cid);         // commitEditing 可能删掉目标块（如空块自删）——重解析防悬垂
@@ -330,7 +352,8 @@ function enterEdit(cid, atEnd = true) {
   el.classList.add("bm-editing");
   el.contentEditable = "true";
   el.innerHTML = highlightEditableSource(b.source);
-  placeCaret(el, atEnd);
+  if (caretOffset !== null) setCaretTextOffset(el, caretOffset); else placeCaret(el, atEnd);
+  trace("blockIn", { cid, off: caretTextOffset(el) });
   updateMarksActive();
   syncFocusHighlight();
   refreshFindIfOpen();
@@ -345,6 +368,10 @@ function refreshFindIfOpen() {
 
 // 代码块/公式块：CodeMirror 内嵌编辑（kind=code 带语言输入框；kind=math 用 stex 模式）
 function mountCmBlock(b, kind) {
+  return inTransition(() => mountCmBlockInner(b, kind));
+}
+
+function mountCmBlockInner(b, kind) {
   commitEditing();
   const el = write().querySelector(`[data-cid="${b.cid}"]`);
   const lines = b.source.split("\n");
@@ -364,6 +391,7 @@ function mountCmBlock(b, kind) {
   const langInput = el.querySelector(".bm-lang-input");
   editingCm = { cid: b.cid, cm, langInput, kind, baseline: b.source, baselineLang: lang };
   // blur 延迟提交须校验身份：定时器跨块存活时 editingCm 可能已换人（前一个 CM 的陈旧回调不得提交新 CM）
+  trace("cmIn", { cid: b.cid, kind });
   cm.on("blur", () => setTimeout(() => {
     if (editingCm && editingCm.cm === cm && document.activeElement !== editingCm.langInput) commitEditing();
   }, 150));
@@ -413,6 +441,8 @@ function commitEditing() {
   const b = findBlock(editingCid);
   const el = write().querySelector(`[data-cid="${editingCid}"]`);
   if (!b || !el) { editingCid = null; return; }
+  pressGesture = null;   // 离开编辑态：按下手势作废
+  trace("blockOut", { cid: editingCid });
   // "编辑态 el 的 textContent == 源码" 只在可编辑时成立；若期间块被重渲染成渲染态
   // （如围栏转换 renderAll 后），可见文本不是源码 —— 以 b.source 为准，禁止回写清空
   const newSource = el.isContentEditable ? el.textContent.replace(/\u00a0/g, " ") : b.source;
@@ -645,17 +675,28 @@ function flashJump(el) {
 
 let cellEditing = null; // {cid, td}
 
+// 进入单元格编辑。切换流程固定为：提交既有编辑态 → 定位目标 → 登记 → 聚焦，全部同步完成。
+// （旧实现把"提交上一个编辑中的块"寄托在该块失焦后的延时回调上；td.focus() 在本函数内部同步
+// 触发旧块 focusout，挂出的定时器却要等函数返回、新状态登记之后才触发，于是把刚进入的单元格
+// 编辑一并提交掉——"编辑中的块 → 点单元格，首击被吞"的根因）
 function enterCellEdit(blockEl, td, at) {
+  return inTransition(() => enterCellEditInner(blockEl, td, at));
+}
+
+function enterCellEditInner(blockEl, td, at) {
   if (!td) return;
   cancelMmdEditTimer();   // 改点进格编辑：mermaid 延时器作废（同 enterEdit）
-  if (cellEditing) commitCellEdit();   // 先提交上一格；其重渲染会替换整块 DOM
-  // 上一步 rerenderBlock 后入参 td 可能已脱离 DOM（双击/直接点另一格）：按 r/c 重新解析
+  const cid = blockEl.dataset.cid;
   const r = td.dataset.r, c = td.dataset.c;
-  blockEl = write().querySelector(`[data-cid="${blockEl.dataset.cid}"]`) || blockEl;
+  commitEditing();        // 先落所有编辑态活文本（单元格/代码/块）；其重渲染会替换整块 DOM
+  // 提交可能已重建本表：按 r/c 坐标从当前 DOM 重新解析
+  blockEl = write().querySelector(`[data-cid="${cid}"]`) || blockEl;
   td = blockEl.querySelector(`td[data-r="${r}"][data-c="${c}"], th[data-r="${r}"][data-c="${c}"]`) || td;
-  const b = findBlock(blockEl.dataset.cid);
+  if (!td.isConnected) return;
+  const b = findBlock(cid);
   if (!b) return;
   const src = tableGetCell(b.source, +r, +c) ?? "";
+  cellEditing = { cid: b.cid, td };   // 先登记后聚焦：聚焦过程中派发的焦点事件看到的是完整状态
   td.textContent = src;                    // 显示该格源码（与整块编辑模型一致）
   td.classList.add("bm-cell-editing");
   td.focus();
@@ -676,13 +717,14 @@ function enterCellEdit(blockEl, td, at) {
     range.selectNodeContents(td);
     sel.addRange(range);                    // 无坐标（Tab/Enter 导航/菜单聚焦）：全选，输入即替换
   }
-  cellEditing = { cid: b.cid, td };
+  trace("cellIn", { cid: b.cid, cell: r + "," + c, byClick: !!at });
 }
 
 function commitCellEdit() {
   if (!cellEditing) return;
   const { cid, td } = cellEditing;
   cellEditing = null;
+  trace("cellOut", { cid });
   td.classList.remove("bm-cell-editing");
   const b = findBlock(cid);
   const r = +td.dataset.r, c = +td.dataset.c;
@@ -734,6 +776,63 @@ function moveCellTo(cid, r, c) {
   commitCellEdit();
   const blockEl = write().querySelector(`[data-cid="${cid}"]`);
   if (blockEl) enterCellEdit(blockEl, blockEl.querySelector(`[data-r="${r}"][data-c="${c}"]`));
+}
+
+// ---------- 一致性：状态登记 ↔ 真实焦点（宪章原则 I） ----------
+// 不变量：登记为编辑中 ⇔ 对应元素在文档中、可编辑、是焦点元素且光标在其内。
+// 每次左键按下处理前先校验并修复：不满足的编辑态先读 DOM 活文本提交再清除登记，
+// 保证无论此前因为什么原因走样，"下一次点击必生效"。
+
+function blockElOf(cid) { return write().querySelector(`[data-cid="${cid}"]`); }
+
+function caretIn(el) {
+  if (!el || !el.isConnected || document.activeElement !== el) return false;
+  const sel = getSelection();
+  return sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).startContainer);
+}
+
+// 返回被修复项（只读检查用 consistencyIssues，不改状态）
+function reconcileEditingState() {
+  const fixed = [];
+  if (editingCid && !caretIn(blockElOf(editingCid))) { commitEditing(); fixed.push("block"); }
+  if (cellEditing && !caretIn(cellEditing.td)) { commitCellEdit(); fixed.push("cell"); }
+  if (editingCm && !(cmFocused(editingCm))) { commitEditing(); fixed.push("cm"); }
+  for (const f of fixed) trace("reconcile", { fixed: f });
+  return fixed;
+}
+
+function cmFocused(ec) {
+  const host = ec.cm.getWrapperElement();
+  const ae = document.activeElement;
+  return !!host && host.isConnected && (host.contains(ae) || ae === ec.langInput);
+}
+
+// 只读的一致性检查（诊断导出用），返回问题描述列表
+function consistencyIssues() {
+  const ae = document.activeElement;
+  const issues = [];
+  if (editingCid) {
+    const el = blockElOf(editingCid);
+    if (!el) issues.push("editingCid-no-el");
+    else {
+      if (!el.isContentEditable) issues.push("editing-not-editable");
+      if (ae !== el) issues.push("editing-not-active");
+      else if (!caretIn(el)) issues.push("editing-caret-outside");
+    }
+  }
+  if (cellEditing) {
+    const td = cellEditing.td;
+    if (!td.isConnected) issues.push("cell-no-td");
+    else if (ae !== td) issues.push("cell-not-active");
+    else if (!caretIn(td)) issues.push("cell-caret-outside");
+  }
+  for (const e of write().querySelectorAll(".bm-editing")) {
+    if (!editingCid || e.dataset.cid !== editingCid) issues.push("stale-editing-el:" + e.dataset.cid);
+  }
+  if (cellEditing && !cellEditing.td.classList.contains("bm-cell-editing")) issues.push("cell-missing-class");
+  const ghost = ae && ae !== document.body && ae.isContentEditable && !editingCid && !cellEditing;
+  if (ghost) issues.push("ghost-focus:" + ae.nodeName);
+  return issues;
 }
 
 // 空白区点击（#write 的 padding / 两侧留白没有块可点；空文档整页几乎都是死区）
@@ -1259,6 +1358,209 @@ function insertPastedText(el, text) {
   document.execCommand("insertText", false, text);
 }
 
+// ---------- 落点换算（DOM 侧） ----------
+// 纯函数的换算在 inline.js（blockLineMap / caretSourceOffset）；这里负责把一次点击定位到
+// "块内第几行、第几个可见字符、落在字符的前半还是后半"。
+
+// 枚举块内的渲染行，以及每行可见文字的来源：文本节点，或行内公式元素（KaTeX 渲染后源文本已不在 DOM
+// 文本里，以 data-tex 为准）。勾选框、悬浮按钮等非正文节点跳过；空行保留以维持与源码行的下标对齐。
+function renderedLines(blockEl) {
+  const lines = [[]];
+  const started = new Set();
+  const walker = document.createTreeWalker(blockEl, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  let n, acc = 0;
+  while ((n = walker.nextNode())) {
+    if (n.nodeType === 1) {
+      if (n.tagName === "BR") { lines.push([]); acc = 0; continue; }
+      if (n.classList.contains("bm-task-box") || n.classList.contains("bm-table-zoom-btn") ||
+          n.classList.contains("bm-mermaid-zoom-btn")) {
+        if (n.firstChild) walker.lastChild();
+        continue;
+      }
+      if (n.classList.contains("bm-imath")) {
+        const tex = n.dataset.tex || "";
+        lines[lines.length - 1].push({ el: n, start: acc, len: tex.length, text: tex, rect: n.getBoundingClientRect() });
+        acc += tex.length;
+        if (n.firstChild) walker.lastChild();
+        continue;
+      }
+      if (/^(P|LI|H[1-6]|DIV|BLOCKQUOTE)$/.test(n.tagName) && !started.has(n)) {
+        started.add(n);
+        if (acc) { lines.push([]); acc = 0; }   // 每个行级容器另起一行
+      }
+      continue;
+    }
+    if (!n.textContent.length) continue;
+    lines[lines.length - 1].push({ node: n, start: acc, len: n.textContent.length, text: n.textContent });
+    acc += n.textContent.length;
+  }
+  return lines;
+}
+
+function lineRect(line) {
+  const r = document.createRange();
+  const first = line[0], last = line[line.length - 1];
+  if (first.node) r.setStart(first.node, 0); else r.setStartBefore(first.el);
+  if (last.node) r.setEnd(last.node, last.len); else r.setEndAfter(last.el);
+  return r.getBoundingClientRect();
+}
+
+// 没命中文本时（行尾右侧空白、块的下边缘）按纵坐标取最近的一行
+function nearestLine(built, y) {
+  let best = -1, bestD = Infinity;
+  built.forEach((line, k) => {
+    if (!line.length) return;
+    const r = lineRect(line);
+    if (y >= r.top && y <= r.bottom) { best = k; bestD = -1; return; }
+    const d = Math.min(Math.abs(y - r.top), Math.abs(y - r.bottom));
+    if (d < bestD) { bestD = d; best = k; }
+  });
+  return best;
+}
+
+// 第 ci 个可见字符的矩形
+function charRect(line, ci) {
+  for (const seg of line) {
+    if (ci < seg.start + seg.len) {
+      if (seg.el) return seg.rect;
+      const r = document.createRange();
+      r.setStart(seg.node, ci - seg.start);
+      r.setEnd(seg.node, Math.min(ci - seg.start + 1, seg.len));
+      return r.getBoundingClientRect();
+    }
+  }
+  return null;
+}
+
+// 点击更靠近前一个字符（落它之后）还是后一个字符（落它之前）
+function closerToPrev(line, v, x) {
+  const prev = charRect(line, v - 1), next = charRect(line, v);
+  if (!prev || !prev.width) return false;
+  if (!next || !next.width) return true;
+  return (x - (prev.left + prev.right) / 2) <= ((next.left + next.right) / 2 - x);
+}
+
+// 表格旁空白 → 整表源码编辑，光标落在被点击行的行尾（表上方 → 源码开头；下方 → 结尾）
+function tableRowEnd(b, blockEl, point) {
+  const lines = blockLineMap(b);
+  const trs = [...blockEl.querySelectorAll("tr")];
+  if (!trs.length) return { off: b.source.length, lineText: "" };
+  const tops = trs.map(tr => tr.getBoundingClientRect().top);
+  const bottom = trs[trs.length - 1].getBoundingClientRect().bottom;
+  if (point.y < tops[0]) return { off: 0, lineText: "" };
+  if (point.y > bottom) return { off: b.source.length, lineText: "" };
+  let idx = 0;
+  for (let k = 1; k < tops.length; k++) if (point.y >= tops[k]) idx = k;
+  // thead 一行对应源码第 1 行；tbody 各行对应源码第 3 行起（第 2 行是分隔行，没有 tr）
+  const L = lines[Math.min(idx === 0 ? 0 : idx + 1, lines.length - 1)];
+  return { off: L.start + L.text.length, lineText: L.text };
+}
+
+// 渲染态块上的点击 → { off: 源码偏移, li: 行号, v: 可见字符下标, preferPrev, lineText }，无法定位返回 null
+function resolveCaretTarget(blockEl, point) {
+  const b = findBlock(blockEl.dataset.cid);
+  if (!b) return null;
+  const lines = blockLineMap(b);
+  if (!lines) return null;
+  if (b.type === "table") return tableRowEnd(b, blockEl, point);
+  const built = renderedLines(blockEl);
+  if (!built.length) return null;
+  const hit = document.caretRangeFromPoint ? document.caretRangeFromPoint(point.x, point.y) : null;
+  let li = -1, v = -1;
+  if (hit) {
+    outer: for (let k = 0; k < built.length; k++) {
+      for (const seg of built[k]) {
+        if (seg.el) {
+          if (seg.el === hit.startContainer || seg.el.contains(hit.startContainer)) {
+            li = k;
+            v = seg.start + (point.x < seg.rect.left + seg.rect.width / 2 ? 0 : seg.len);
+            break outer;
+          }
+        } else if (seg.node === hit.startContainer) {
+          li = k;
+          v = seg.start + Math.max(0, Math.min(hit.startOffset, seg.len));
+          break outer;
+        }
+      }
+    }
+  }
+  if (li < 0) {                      // 没命中文本：取最近的一行，落其行尾
+    li = nearestLine(built, point.y);
+    if (li < 0) return null;
+    v = built[li].reduce((n, seg) => n + seg.len, 0);
+  }
+  const text = built[li].map(seg => seg.text).join("");
+  const preferPrev = v > 0 && v < text.length && closerToPrev(built[li], v, point.x);
+  const off = caretSourceOffset(lines, li, v, preferPrev);
+  return off === null ? null : { off, li, v, preferPrev, lineText: text };
+}
+
+// ---------- 按下手势（拖选 / 双击选词） ----------
+// 用户在"渲染态"块上按下：这次按下已让块进入源码编辑态，随后的拖动/双击都发生在源码 DOM 上，
+// 而源码 DOM 的文字相对所见已经位移（不可见语法显形）。所以把渲染态的行文字与换算信息留在手势里，
+// 手势一律按"用户所见"解释。块原本就在编辑态时不建手势，交给原生行为。
+
+let pressGesture = null;
+// 手势保留到下一次单击（见 mousedown 里的作废规则）或超时为止。超时只是兜底，取值放宽到慢速双击也能覆盖
+// （系统"双击速度"可调到数秒；太短的话第二下落下时手势已失效，会退回原生选词）。
+const GESTURE_MS = 4000;
+
+function beginPressGesture(cid, target) {
+  const el = blockElOf(cid);
+  if (!el || !el.isContentEditable) { pressGesture = null; return; }
+  const sel = getSelection();
+  const g = {
+    cid, li: target.li, v: target.v, preferPrev: target.preferPrev, lineText: target.lineText,
+    lines: blockLineMap(findBlock(cid)),
+    anchorOff: target.off,
+    anchored: sel.rangeCount > 0 && el.contains(sel.anchorNode),   // 按下时光标确实落在了块里，才能作为拖选的锚
+  };
+  pressGesture = g;
+  setTimeout(() => { if (pressGesture === g) pressGesture = null; }, GESTURE_MS);
+}
+
+// 文本偏移 → DOM 位置（跨装饰 span 稳定；编辑态 textContent === 源码，偏移即源码偏移）
+function pointAt(el, off) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node, last = null, acc = 0;
+  while ((node = walker.nextNode())) {
+    last = node;
+    const len = node.textContent.length;
+    if (off <= acc + len) return { node, offset: off - acc };
+    acc += len;
+  }
+  return last ? { node: last, offset: last.textContent.length } : { node: el, offset: 0 };
+}
+
+function selectTextOffsets(el, a, b) {
+  const from = pointAt(el, a), to = pointAt(el, b);
+  getSelection().setBaseAndExtent(from.node, from.offset, to.node, to.offset);
+}
+
+function textOffsetAt(el, node, off) {
+  const probe = document.createRange();
+  probe.selectNodeContents(el);
+  probe.setEnd(node, off);
+  return probe.toString().length;
+}
+
+// 分词（系统分词器，支持中文）：返回包含第 ci 个字符的词段 { start, end, wordLike }。
+// 定界符、标点、空白在分词里自成一段（wordLike 为假），不会被选进词里。
+let wordSegmenter;
+function wordSegmentAt(text, ci) {
+  if (wordSegmenter === undefined) {
+    wordSegmenter = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: "word" }) : null;
+  }
+  if (wordSegmenter) {
+    for (const seg of wordSegmenter.segment(text)) {
+      if (ci < seg.index + seg.segment.length) return { start: seg.index, end: seg.index + seg.segment.length, wordLike: !!seg.isWordLike };
+    }
+    return { start: ci, end: ci, wordLike: false };
+  }
+  const m = text.slice(ci).match(/^[A-Za-z0-9_]+/) || text.slice(ci).match(/^\p{Script=Han}/u);   // 兜底：英文词或单个汉字
+  return m ? { start: ci, end: ci + m[0].length, wordLike: true } : { start: ci, end: ci, wordLike: false };
+}
+
 // ---------- 事件 ----------
 
 function bindEvents() {
@@ -1267,6 +1569,13 @@ function bindEvents() {
   w.addEventListener("mousedown", e => {
     if (sourceMode) return;
     if (e.button !== 0) return;   // 右键交给 contextmenu（不再闪现源码编辑态）；中键系统自理
+    reconcileEditingState();      // 先修复状态与焦点的不一致：保证这一次点击必定生效
+    // 新的一次单击（点击计数 1）：上一处按下留下的手势作废，否则随后的双击会选到上一次点击处的词；
+    // 双击的第二下计数为 2，手势保留给 dblclick 使用
+    if (pressGesture && e.detail < 2) pressGesture = null;
+    const point = { x: e.clientX, y: e.clientY };
+    const hitBlock = e.target.closest ? e.target.closest(".bm-block") : null;
+    trace("mousedown", { cid: hitBlock ? hitBlock.dataset.cid : null, x: point.x, y: point.y, n: e.detail });
     if (e.target.closest && e.target.closest(".bm-table-zoom-btn")) {
       e.preventDefault();
       const blockEl = e.target.closest(".bm-block");
@@ -1296,8 +1605,9 @@ function bindEvents() {
     }
     const blockEl = e.target.closest(".bm-block");
     if (!blockEl) return;
+    // 链接：⌘/Ctrl 点击打开（对标 Typora）；单击与普通文字一样只是把光标落到那里
     const a = e.target.closest("a");
-    if (a && blockEl.dataset.cid !== editingCid) {
+    if (a && blockEl.dataset.cid !== editingCid && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       Bridge.call("path.openURL", { url: a.getAttribute("href") });
       return;
@@ -1347,15 +1657,24 @@ function bindEvents() {
       return;
     }
     if (blockEl.dataset.cid !== editingCid) {
+      // 渲染态块：必须在改写 DOM 之前取命中位置并换算源码偏移——
+      // 切到源码态后不可见的语法会显形，文字整体位移，原生落点必然偏
+      const target = resolveCaretTarget(blockEl, point);
       e.preventDefault();
-      enterEdit(blockEl.dataset.cid);
+      enterEdit(blockEl.dataset.cid, !target, target ? target.off : null);
+      if (target) beginPressGesture(blockEl.dataset.cid, target);
     }
   });
 
   // 空白区点击兜底（挂在滚动容器上，覆盖 #write padding 与两侧留白；块内点击已被上方处理器消费）
   scroller().addEventListener("mousedown", e => {
     if (sourceMode || e.button !== 0) return;
-    if (e.target.closest(".bm-block") || e.target.closest("#bm-source-wrap")) return;
+    // 用分发时确定的路径判断点击是否发生在块内：块处理器会在分发过程中替换被点击的元素，
+    // 等事件冒泡到这里再查 DOM，原目标已脱离文档树，会被误判成"点了空白"而再次进入编辑、把光标拽回块尾
+    const path = e.composedPath ? e.composedPath() : [];
+    const inBlock = path.some(n => n.classList && n.classList.contains("bm-block")) ||
+                    (e.target.closest && !!e.target.closest(".bm-block"));
+    if (inBlock || (e.target.closest && e.target.closest("#bm-source-wrap"))) return;
     if (!blocks.length) return;
     e.preventDefault();
     focusBlankAreaAt(e.clientY);
@@ -1580,9 +1899,10 @@ function bindEvents() {
   });
 
   // IME 守卫：组合期间禁止重渲染（打断组合会丢字）
-  w.addEventListener("compositionstart", () => { composing = true; });
+  w.addEventListener("compositionstart", () => { composing = true; trace("compositionStart"); });
   w.addEventListener("compositionend", () => {
     composing = false;
+    trace("compositionEnd");
     relightEditing();
   });
 
@@ -1684,21 +2004,78 @@ function bindEvents() {
     }
   });
 
+  // 焦点移出编辑区 → 延后提交。只服务于"用户把焦点移到别处"（侧栏、查找栏、别的应用）；
+  // 程序化切换目标期间的焦点事件由切换流程自己负责，一律忽略。
+  // 延时回调按"失焦时的那个目标"校验身份，不对回调触发时的全局状态想当然。
   w.addEventListener("focusout", e => {
-    if (cellEditing && e.target === cellEditing.td) {
+    if (transitioning) return;
+    trace("focusout", { cid: e.target && e.target.dataset ? e.target.dataset.cid : null });
+    const cellTd = cellEditing && cellEditing.td;
+    if (cellTd && e.target === cellTd) {
       setTimeout(() => {
-        if (cellEditing && document.activeElement !== cellEditing.td) commitCellEdit();
+        if (cellEditing && cellEditing.td === cellTd && document.activeElement !== cellTd) commitCellEdit();
       }, 0);
       return;
     }
     const blockEl = e.target.closest ? e.target.closest(".bm-block") : null;
-    if (blockEl && blockEl.dataset.cid === editingCid) {
+    const cid = blockEl ? blockEl.dataset.cid : null;
+    if (cid && cid === editingCid) {
       setTimeout(() => {
-        if (!blockEl.isConnected) return;   // 期间块被重渲染/重建（同 cid 新 el）：脱钩 el 不代表当前编辑态
+        if (editingCid !== cid) return;         // 期间已切换目标：这个回调不再代表任何事实
+        const el = blockElOf(cid);
+        if (!el || !el.isContentEditable) return;   // 块已被重渲染/重建：不是当前编辑态
         const sel = getSelection();
-        if (!sel.anchorNode || !blockEl.contains(sel.anchorNode)) commitEditing();
+        if (!sel.anchorNode || !el.contains(sel.anchorNode)) commitEditing();
       }, 0);
     }
+  });
+
+  // 按下手势：按住拖动 → 以按下点为锚扩展选区（按下的默认动作已被阻止，浏览器不会自行开始拖选）
+  document.addEventListener("mousemove", e => {
+    const g = pressGesture;
+    if (!g || !g.anchored || !(e.buttons & 1) || editingCid !== g.cid) return;
+    const el = blockElOf(g.cid);
+    if (!el) return;
+    const pos = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+    let target;
+    if (pos && el.contains(pos.startContainer)) {
+      target = textOffsetAt(el, pos.startContainer, pos.startOffset);
+    } else {                              // 拖出块外：上方 → 块首，其余 → 块尾
+      target = e.clientY < el.getBoundingClientRect().top ? 0 : el.textContent.length;
+    }
+    if (target !== null) selectTextOffsets(el, Math.min(g.anchorOff, target), Math.max(g.anchorOff, target));
+  });
+  // 刚建立的选择不允许被当成拖放源（手势存续期间的拖动是选择，不是搬运）
+  w.addEventListener("dragstart", e => { if (pressGesture) e.preventDefault(); });
+  // 双击选词：按分词选中"被双击的词"，两种情形保持一致——
+  // ① 渲染态块上的首次双击：手势里留着所见行文字（原生双击发生在已位移的源码 DOM 上，会选到相邻的词）；
+  // ② 已在编辑态的块：按源码行文字分词（定界符、标点自成一段，不会选进词里；原生选词在中文上可能只选一个字）。
+  // 点在空白或标点上（wordLike 为假）时不干预，保留原生行为。
+  w.addEventListener("dblclick", e => {
+    const g = pressGesture;
+    const el = g && editingCid === g.cid ? blockElOf(g.cid) : null;
+    if (el && el.isContentEditable) {
+      const ci = Math.max(0, Math.min(g.preferPrev ? g.v - 1 : g.v, g.lineText.length - 1));
+      const seg = wordSegmentAt(g.lineText, ci);
+      if (!seg.wordLike) return;
+      const from = caretSourceOffset(g.lines, g.li, seg.start, false), to = caretSourceOffset(g.lines, g.li, seg.end, true);
+      if (from === null || to === null || to <= from) return;
+      e.preventDefault();
+      selectTextOffsets(el, from, to);
+      return;
+    }
+    const editing = editingCid ? blockElOf(editingCid) : null;
+    if (!editing || !e.target.closest || e.target.closest(".bm-block") !== editing) return;
+    const off = caretTextOffset(editing);
+    if (off === null) return;
+    const text = editing.textContent;
+    const lineStart = text.lastIndexOf("\n", Math.max(0, off - 1)) + 1;
+    let lineEnd = text.indexOf("\n", off);
+    if (lineEnd < 0) lineEnd = text.length;
+    const seg = wordSegmentAt(text.slice(lineStart, lineEnd), off - lineStart);
+    if (!seg.wordLike) return;
+    e.preventDefault();
+    selectTextOffsets(editing, lineStart + seg.start, lineStart + seg.end);
   });
 }
 
@@ -2309,6 +2686,26 @@ window.Editor = {
   _findState: () => ({ hits: findHits.length, idx: findIdx }),
   _assetBase: b => { assetBase = b; enhanceImages(); },
   _editingState: () => ({ editingCid, hasCm: !!editingCm, cellEdit: cellEditing ? { r: cellEditing.td.dataset.r, c: cellEditing.td.dataset.c } : null, markCount: document.querySelectorAll(".bm-mark").length }),
+  // 诊断导出（纯读取，不改任何状态）：原生侧菜单「导出编辑器诊断信息」调用
+  _diag: () => JSON.stringify({
+    app: "BlockMark", now: new Date().toISOString(), ua: navigator.userAgent,
+    state: {
+      editingCid, cellEdit: cellEditing ? { r: cellEditing.td.dataset.r, c: cellEditing.td.dataset.c } : null,
+      hasCm: !!editingCm, sourceMode, blocks: blocks.length,
+      active: document.activeElement ? document.activeElement.nodeName + (document.activeElement.dataset && document.activeElement.dataset.cid ? "[" + document.activeElement.dataset.cid + "]" : "") : null,
+      hasFocus: document.hasFocus(), rangeCount: getSelection().rangeCount,
+      caretInEditing: editingCid ? caretIn(blockElOf(editingCid)) : !!cellEditing && caretIn(cellEditing.td),
+    },
+    issues: consistencyIssues(),
+    trace: traceLog.slice(),
+  }),
+  _reconcile: () => reconcileEditingState().slice(),   // 测试钩子：执行一次一致性校验与修复
+  _resolveCaretOffset: (cid, x, y) => {                 // 测试钩子：只读地换算"在 (x,y) 点击块 cid 的源码落点"
+    const el = blockElOf(cid);
+    if (!el || editingCid === cid) return null;
+    const t = resolveCaretTarget(el, { x, y });
+    return t ? t.off : null;
+  },
 };
 
 // ---------- 启动 ----------

@@ -12,3 +12,7 @@ EditorResources/e2e-*.html
 
 # release 打包产物
 BlockMark-*.zip
+
+# WebKit 探针台二进制与 Python 缓存（tools/webkit-probe/build.sh 产物，开发期工具）
+tools/webkit-probe/bmh
+__pycache__/

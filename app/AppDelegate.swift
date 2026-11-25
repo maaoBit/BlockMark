@@ -89,6 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appSubMenu.addItem(.separator())
         appSubMenu.addItem(withTitle: "设置…", action: #selector(SettingsWindowController.showSettings(_:)), keyEquivalent: ",")
             .target = SettingsWindowController.shared   // 同上：单例须显式绑定
+        // 编辑器诊断：偶发"卡住"类问题的现场记录（只读，复制到剪贴板；页面无响应时 5 秒内明确提示）
+        appSubMenu.addItem(withTitle: "导出编辑器诊断信息", action: #selector(EditorWindowController.exportDiagnostics(_:)), keyEquivalent: "")
         appSubMenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenu.submenu = appSubMenu
         mainMenu.addItem(appMenu)

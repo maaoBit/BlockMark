@@ -45,6 +45,37 @@ const sh = read("tools/run-e2e.sh");
 const suites = /SUITES=\(([^)]+)\)/.exec(sh)?.[1]?.split(/\s+/).filter(Boolean) ?? [];
 t("run-e2e.sh 套件全有生成器", suites.every(s => read(`tools/gen-e2e-${s}.mjs`).length > 0), suites.join(","));
 t("套件含 m11", suites.includes("m11"));
+t("套件含 m12（点击落光标 / 点击生效）", suites.includes("m12"));
+
+// 点击生效（specs/001-reliable-click-caret）：进入单元格编辑必须"先提交既有编辑态、后聚焦"。
+// 旧实现把提交旧块寄托在 focusout 的延时回调上，回调在函数返回后才触发，会把刚进入的单元格一并提交掉
+// （"编辑中的块 → 点单元格，首击被吞"）。这里从源码结构上钉死顺序，e2e/探针台从行为上钉死。
+{
+  const fn = js.slice(js.indexOf("function enterCellEditInner("), js.indexOf("function commitCellEdit("));
+  t("enterCellEdit：先 commitEditing 后 td.focus()",
+    fn.includes("commitEditing();") && fn.indexOf("commitEditing();") < fn.indexOf("td.focus()"));
+  t("enterCellEdit：先登记 cellEditing 后聚焦", fn.indexOf("cellEditing = {") < fn.indexOf("td.focus()"));
+  t("focusout 延时回调按失焦目标校验身份",
+    /if \(editingCid !== cid\) return;/.test(js) && /cellEditing\.td === cellTd/.test(js));
+  t("空白区兜底按分发路径判定", /composedPath\(\)/.test(js) && js.includes("reconcileEditingState();"));
+}
+// 诊断导出（US5）：页面侧只读接口 ↔ 原生菜单项与带超时的导出动作
+const appDel = read("app/AppDelegate.swift");
+t("诊断：Editor._diag 与 ≥60 条的环形缓冲",
+  /_diag: \(\) => JSON\.stringify\(/.test(js) && /const TRACE_MAX = (\d+)/.exec(js)?.[1] >= 60);
+t("诊断：应用菜单项 ↔ 原生导出动作",
+  appDel.includes("导出编辑器诊断信息") &&
+  appDel.includes("#selector(EditorWindowController.exportDiagnostics(_:))") &&
+  swift.includes("func exportDiagnostics(") && swift.includes('"Editor._diag()"'));
+t("诊断：页面无响应时 5 秒内提示", /asyncAfter\(deadline: \.now\(\) \+ 5\)/.test(swift) && swift.includes("编辑器无响应"));
+// Swift 卫生：新增代码不得把弯引号当代码定界符（已知坑：写中文串时混入 “ ” 会让 swiftc 报错）。
+// 只查代码段——既有界面文案与注释里合法使用中文引号，不在限制之列。
+{
+  const a = swift.indexOf("func exportDiagnostics(");
+  const body = swift.slice(a, swift.indexOf("// MARK:", a + 1));
+  t("exportDiagnostics 代码段无弯引号", a > 0 && !/[“”]/.test(body));
+  t("AppDelegate 菜单代码无弯引号", !/[“”]/.test(appDel.slice(appDel.indexOf("private func buildMenus()"), appDel.indexOf("NSApplication.shared.mainMenu"))));
+}
 
 console.log(`\n结果: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

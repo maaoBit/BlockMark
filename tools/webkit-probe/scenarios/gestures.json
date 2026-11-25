@@ -1,0 +1,230 @@
+[
+{
+"kind": "log",
+"note": "G1 首次按下即拖选（纯文本）"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "down",
+"pos": "__bmChar('b2', 0, 1, 0.2)"
+},
+{
+"kind": "move",
+"pos": "__bmChar('b2', 0, 2, 0.5)"
+},
+{
+"kind": "move",
+"pos": "__bmChar('b2', 0, 4, 0.8)"
+},
+{
+"kind": "up",
+"pos": "__bmChar('b2', 0, 4, 0.8)"
+},
+{
+"kind": "expect",
+"js": "Editor._editingState().editingCid === 'b2'",
+"equals": true
+},
+{
+"kind": "expect",
+"js": "getSelection().toString() === '好世界，'",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "G2 拖选跨粗体定界符（按下点跳过不可见语法，之后按所见拖动）"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "down",
+"pos": "__bmChar('b6', 0, 7, 0.2)"
+},
+{
+"kind": "move",
+"pos": "__bmChar('b6', 0, 10, 0.5)"
+},
+{
+"kind": "move",
+"pos": "__bmChar('b6', 0, 13, 0.8)"
+},
+{
+"kind": "up",
+"pos": "__bmChar('b6', 0, 13, 0.8)"
+},
+{
+"kind": "expect",
+"js": "getSelection().toString() === '粗体**与'",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "G3 双击中文词（渲染态所见为准，不被源码位移带偏）"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"pos": "__bmChar('b6', 0, 12, 0.5)",
+"hold": 8
+},
+{
+"kind": "click",
+"pos": "__bmChar('b6', 0, 12, 0.5)",
+"hold": 8,
+"clicks": 2
+},
+{
+"kind": "expect",
+"js": "getSelection().toString() === '还有'",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "G4 双击英文词 Hello（点在 e 上）"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "eval",
+"js": "document.querySelector('[data-cid=b11]').scrollIntoView({block: 'center'}); 1"
+},
+{
+"kind": "wait",
+"ms": 80
+},
+{
+"kind": "click",
+"pos": "__bmChar('b11', 0, 1, 0.5)",
+"hold": 8
+},
+{
+"kind": "click",
+"pos": "__bmChar('b11', 0, 1, 0.5)",
+"hold": 8,
+"clicks": 2
+},
+{
+"kind": "expect",
+"js": "getSelection().toString() === 'Hello'",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "G5 双击粗体词 → 源码区间不含定界符（分词以系统词典为准）"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"pos": "__bmChar('b6', 0, 7, 0.5)",
+"hold": 8
+},
+{
+"kind": "click",
+"pos": "__bmChar('b6', 0, 7, 0.5)",
+"hold": 8,
+"clicks": 2
+},
+{
+"kind": "expect",
+"js": "['粗', '粗体'].includes(getSelection().toString())",
+"equals": true
+},
+{
+"kind": "expect",
+"js": "!getSelection().toString().includes('*')",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "G6 拖出块下方 → 选到块尾"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "down",
+"pos": "__bmChar('b2', 0, 1, 0.2)"
+},
+{
+"kind": "move",
+"pos": "(() => { const r = document.querySelector('[data-cid=b2]').getBoundingClientRect(); return [r.left + 20, r.bottom + 60]; })()"
+},
+{
+"kind": "up",
+"pos": "(() => { const r = document.querySelector('[data-cid=b2]').getBoundingClientRect(); return [r.left + 20, r.bottom + 60]; })()"
+},
+{
+"kind": "expect",
+"js": "getSelection().toString() === '好世界，第二段落。'",
+"equals": true
+},
+{
+"kind": "check"
+},
+{
+"kind": "log",
+"note": "G7 单击后随即在别处双击 → 选中所双击的词"
+},
+{
+"kind": "open",
+"md": "# 标题文字\n\n你好世界，第二段落。\n\n- 列表项甲\n- 列表项**乙**续\n  延续行文字\n\n> 引用一行文字\n\n| 甲 | 乙 |\n| --- | --- |\n| a1 | a2 |\n| b1 | b2 |\n\n表后正文段落，**粗体**与`代码`还有[链接](https://example.com)。\n\n末尾段落，再写一些文字。\n\n第一行文字\n第二行文字\n第三行文字\n\n- [ ] 任务一文字\n\n公式 $a+b$ 后文\n\nHello world foo\n"
+},
+{
+"kind": "click",
+"pos": "__bmChar('b6', 0, 10, 0.5)",
+"hold": 8
+},
+{
+"kind": "click",
+"pos": "__bmChar('b6', 0, 21, 0.5)",
+"hold": 8
+},
+{
+"kind": "click",
+"pos": "__bmChar('b6', 0, 21, 0.5)",
+"hold": 8,
+"clicks": 2
+},
+{
+"kind": "expect",
+"js": "(() => { const s = getSelection().toString(); return s.length > 0 && s !== '还有' && !/[\\[\\]()]/.test(s); })()",
+"equals": true
+},
+{
+"kind": "expect",
+"js": "['链', '链接'].includes(getSelection().toString())",
+"equals": true
+},
+{
+"kind": "check"
+}
+]
